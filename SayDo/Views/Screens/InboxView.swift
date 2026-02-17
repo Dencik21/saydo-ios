@@ -12,10 +12,23 @@ struct InboxView: View {
     @EnvironmentObject private var store: TaskStore
 
     var body: some View {
-        TaskListView(tasks: $store.tasks)
-            .navigationTitle("Inbox")
+        List {
+            ForEach($store.tasks) { $task in
+                if task.dueDate == nil && !task.isDone {
+                    HStack {
+                        Button { task.isDone.toggle() } label: {
+                            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        }
+                        .buttonStyle(.plain)
+                        Text(task.title)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Inbox")
     }
 }
+
 
 #Preview {
    InboxView()

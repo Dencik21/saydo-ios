@@ -2,88 +2,146 @@ import Foundation
 
 final class TaskExtractor {
 
+    private let dateParser = DateParser()
+    private let beautifier = TextBeautifier()
+
     func extract(from text: String) -> [TaskItem] {
-        // 1) базовое разбиение по пунктуации
-        var parts = text
+
+        // 1️⃣ Beautify
+        var prepared = beautifier.beautify(text)
+
+        // 2️⃣ ГЛАВНЫЙ ФИКС: если речь пришла одной строкой, разделяем по датам:
+        // "22-го ... 21-го ..." -> "22-го ... . 21-го ..."
+        prepared = prepared.replacingOccurrences(
+            of: #"(?<!^)\s+(\d{1,2}\s*(?:-?\s*го)?)(?=\s)"#,
+            with: ". $1",
+            options: .regularExpression
+        )
+
+        // 3️⃣ Делим по точкам/переносам
+        var parts = prepared
             .replacingOccurrences(of: "\n", with: ". ")
             .components(separatedBy: CharacterSet(charactersIn: ".!?;"))
             .map(clean)
             .filter { !$0.isEmpty }
 
-        // 2) если какой-то пункт очень длинный — дробим по связкам
-        parts = parts.flatMap { part in
-            part.count > 55 ? splitBySoftConnectors(part) : [part]
-        }
+        // 4️⃣ Делим по глаголам (если в одном куске несколько задач)
+        parts = parts.flatMap { splitByVerbs($0) }
 
-        // 3) финальная чистка + фильтр мусора
+        // 5️⃣ Финальная чистка
         let final = parts
             .map(clean)
             .filter(isGoodTask)
 
-        return final.map { TaskItem(title: capitalizeFirst($0)) }
+        // 6️⃣ Создание задач с переносом даты (контекст)
+        var result: [TaskItem] = []
+        var currentDate: Date? = nil
+
+        for raw in final {
+
+            // парсим одну фразу
+            let (date, cleaned) = dateParser.parse(from: raw)
+
+            // если нашли дату/время — обновляем контекст
+            if let d = date {
+                currentDate = d
+            }
+
+            let title = capitalizeFirst(cleaned.trimmingCharacters(in: .whitespacesAndNewlines))
+            if title.count < 3 { continue }
+
+            result.append(
+                TaskItem(
+                    title: title,
+                    dueDate: currentDate
+                )
+            )
+        }
+
+        return result
     }
 
-    // MARK: - Helpers
+    // MARK: - Clean
 
     private func clean(_ s: String) -> String {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // убрать двойные пробелы
-        while t.contains("  ") { t = t.replacingOccurrences(of: "  ", with: " ") }
+        t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
 
-        // типовые разговорные начала (срезаем, а не выкидываем)
-        let leadingTrash = [
-            "итак", "ну", "короче", "в общем", "значит", "так", "получается"
+        // убрать разговорный мусор
+        let trashPrefixes = [
+            "итак","ну","короче","в общем",
+            "значит","так","получается"
         ]
-        for w in leadingTrash {
+
+        for w in trashPrefixes {
             if t.lowercased().hasPrefix(w + " ") {
-                t = String(t.dropFirst(w.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                t = String(t.dropFirst(w.count)).trimmingCharacters(in: .whitespaces)
             }
         }
 
-        // убрать “мне нужно” в начале — часто это лишнее
+        // убрать "мне нужно", "надо"
         let prefixes = ["мне нужно ", "надо ", "нужно "]
         for p in prefixes {
             if t.lowercased().hasPrefix(p) {
-                t = String(t.dropFirst(p.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                t = String(t.dropFirst(p.count)).trimmingCharacters(in: .whitespaces)
             }
         }
 
-        return t
+        // убрать хвосты типа "и", "а", "но"
+        t = t.replacingOccurrences(
+            of: #"\s+\b(и|а|но|да)\b\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Validation
+
     private func isGoodTask(_ s: String) -> Bool {
-        let low = s.lowercased()
+        let trimmed = s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // слишком короткие/пустые
-        if s.count < 4 { return false }
+        if trimmed.count < 4 { return false }
 
-        // явные “закрывашки” и мусор
-        let trashExact = [
-            "всё", "все", "я ну вот и всё", "ну вот и всё", "что дальше", "в принципе всё"
-        ]
-        if trashExact.contains(low) { return false }
+        if ["и","а","но","да","получится"].contains(trimmed) {
+            return false
+        }
 
-        // если почти нет букв (редкий случай)
-        let letters = low.filter { $0.isLetter }.count
+        let letters = trimmed.filter { $0.isLetter }.count
         if letters < 3 { return false }
 
         return true
     }
 
-    private func splitBySoftConnectors(_ chunk: String) -> [String] {
-        let connectors = [
-            " также ", " и еще ", " и ещё ", " ещё ", " еще ",
-            " может быть ", " плюс ", " а еще ", " а ещё ", " и "
+    // MARK: - Split by verbs
+
+    private func splitByVerbs(_ text: String) -> [String] {
+
+        let verbs = [
+            "купить","пойти","сходить","записаться",
+            "позвонить","написать","сделать",
+            "заказать","оплатить","встретиться",
+            "убрать","приготовить","отправить",
+            "посидеть","погулять"
         ]
 
-        var result = [chunk]
-        for c in connectors {
-            result = result.flatMap { $0.components(separatedBy: c) }
-        }
-        return result.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                     .filter { !$0.isEmpty }
+        let pattern = #"(?<!^)\s+\b("# + verbs.joined(separator: "|") + #")\b"#
+
+        let withDots = text.replacingOccurrences(
+            of: pattern,
+            with: ". $1",
+            options: .regularExpression
+        )
+
+        return withDots
+            .components(separatedBy: ".")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
+
+    // MARK: - Capitalize
 
     private func capitalizeFirst(_ s: String) -> String {
         guard let first = s.first else { return s }

@@ -8,19 +8,33 @@
 
 import SwiftUI
 
+import SwiftUI
+
 struct TodayView: View {
+    @EnvironmentObject private var store: TaskStore
+    private let cal = Calendar.current
+
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Today")
-                .font(.largeTitle.bold())
-            Text("Здесь будут задачи на сегодня.")
-                .foregroundStyle(.secondary)
+        List {
+            ForEach($store.tasks) { $task in
+                if let d = task.dueDate, cal.isDateInToday(d), !task.isDone {
+                    HStack {
+                        Button { task.isDone.toggle() } label: {
+                            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        }
+                        .buttonStyle(.plain)
+
+                        Text(task.title)
+                    }
+                }
+            }
         }
-        .padding()
         .navigationTitle("Today")
     }
 }
 
+
 #Preview {
     TodayView()
+        .environmentObject(TaskStore())
 }

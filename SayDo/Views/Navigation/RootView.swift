@@ -13,20 +13,22 @@ struct RootView: View {
             NavigationStack {
                 InboxView()
             }
-            .tabItem { Label("Inbox", systemImage: "tray.full")}
-            
+            .tabItem { Label("Inbox", systemImage: "tray") }
+
             NavigationStack {
                 RecordView()
             }
-            .tabItem { Label("Record", systemImage: "mic.fill")}
+            .tabItem { Label("Record", systemImage: "mic") }
+
             NavigationStack {
-                TodayView()
+                UpcomingView()
             }
-            .tabItem { Label("Today", systemImage: "sun.max.fill")}
+            .tabItem { Label("Plan", systemImage: "calendar") }
         }
     }
 }
 
 #Preview {
     RootView()
+        .environmentObject(TaskStore())
 }
