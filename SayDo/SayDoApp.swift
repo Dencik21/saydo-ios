@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct SayDoApp: App {
+    @StateObject private var store = TaskStore()
     var body: some Scene {
         WindowGroup {
-            ContentView()
+           RootView()
+                .environmentObject(store)
         }
     }
 }

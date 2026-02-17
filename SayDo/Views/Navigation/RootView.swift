@@ -9,7 +9,21 @@ import SwiftUI
 
 struct RootView: View {
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        TabView {
+            NavigationStack {
+                InboxView()
+            }
+            .tabItem { Label("Inbox", systemImage: "tray.full")}
+            
+            NavigationStack {
+                RecordView()
+            }
+            .tabItem { Label("Record", systemImage: "mic.fill")}
+            NavigationStack {
+                TodayView()
+            }
+            .tabItem { Label("Today", systemImage: "sun.max.fill")}
+        }
     }
 }
 

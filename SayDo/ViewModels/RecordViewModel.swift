@@ -17,11 +17,14 @@ final class RecordViewModel: ObservableObject {
     @Published var isRecording: Bool = false
     @Published var errorMessage: String? = nil
     @Published var language: SpeechLanguage = .ru
-
+    
     
     private let speechService = SpeechService()
     private var streamTask: Task<Void,Never>? = nil
-     
+    
+    private let beautifier = TextBeautifier()
+    private let extractor = TaskExtractor()
+    
     
     func requestPermission() async {
         let ok = await speechService.requestSpeechAuthorization()
@@ -57,7 +60,7 @@ final class RecordViewModel: ObservableObject {
                 }
                 self .isRecording = false
             }
-
+            
         } catch {
             errorMessage = error.localizedDescription
             isRecording = false
@@ -72,12 +75,8 @@ final class RecordViewModel: ObservableObject {
     }
     
     func makeTasks() -> [TaskItem] {
-        let separators = CharacterSet(charactersIn: ",.\n;")
-        return transcript
-            .components(separatedBy: separators)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter{ !$0.isEmpty}
-            .map{ TaskItem(title: $0)}
+        let pretty = beautifier.beautify(transcript)
+        return extractor.extract(from: pretty)
     }
     
 }
