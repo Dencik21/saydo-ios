@@ -1,18 +1,47 @@
 import SwiftUI
+import SwiftData
 
 struct TaskListView: View {
-    @Binding var tasks: [TaskItem]
+    @Environment(\.modelContext) private var context
+
+    // Показать все задачи (можешь потом добавить фильтры/сортировки)
+    @Query(sort: [SortDescriptor(\TaskModel.createdAt, order: .reverse)])
+    private var tasks: [TaskModel]
 
     var body: some View {
         List {
-            ForEach($tasks) { $task in
-                HStack {
-                    Button { task.isDone.toggle() } label: {
-                        Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
-                    }
-                    .buttonStyle(.plain)
+            if tasks.isEmpty {
+                Text("Пока задач нет 🎉")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(tasks) { task in
+                    HStack {
+                        Button {
+                            task.isDone.toggle()
+                            try? context.save()
+                        } label: {
+                            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        }
+                        .buttonStyle(.plain)
 
-                    Text(task.title)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.title)
+
+                            if let due = task.dueDate {
+                                Text(due, style: .date)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Spacer()
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button("Удалить", role: .destructive) {
+                            context.delete(task)
+                            try? context.save()
+                        }
+                    }
                 }
             }
         }
@@ -21,13 +50,8 @@ struct TaskListView: View {
 }
 
 #Preview {
-    StatefulPreviewWrapper([
-        TaskItem(title: "Купить молоко"),
-        TaskItem(title: "Позвонить Ване"),
-        TaskItem(title: "Написать клиенту")
-    ]) { tasks in
-        NavigationStack {
-            TaskListView(tasks: tasks)
-        }
+    NavigationStack {
+        TaskListView()
     }
+    .modelContainer(for: TaskModel.self, inMemory: true)
 }

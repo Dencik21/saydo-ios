@@ -1,36 +1,62 @@
-//
-//  InboxView.swift
-//  SayDo
-//
-//  Created by Denys Ilchenko on 17.02.26.
-//
-
-
 import SwiftUI
+import SwiftData
 
 struct InboxView: View {
-    @EnvironmentObject private var store: TaskStore
-
+    @Environment(\.modelContext) private var context
+    
+    @Query private var tasks: [TaskModel]
+    
+    init() {
+        _tasks = Query(
+            filter: #Predicate<TaskModel> { task in
+                task.isDone == false && task.dueDate == nil
+            },
+            sort: [SortDescriptor(\TaskModel.createdAt, order: .reverse)]
+        )
+    }
+    
     var body: some View {
         List {
-            ForEach($store.tasks) { $task in
-                if task.dueDate == nil && !task.isDone {
-                    HStack {
-                        Button { task.isDone.toggle() } label: {
-                            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+            if tasks.isEmpty {
+                Text("Inbox пуст")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(tasks) { task in
+                    TaskRow(task: task)
+                        .swipeActions(edge: .trailing) {
+                            Button("Today") {
+                                let cal = Calendar.current
+                                task.dueDate = Calendar.current.startOfDay(for: Date())
+                                save()
+                            }
+                            
+                            .tint(.blue)
+                            
+                            Button("Tomorrow") {
+                                task.dueDate = startOfTomorrow()
+                                save()
+                            }
+                            .tint(.green)
+                            
+                            Button("Удалить", role: .destructive) {
+                                context.delete(task)
+                                save()
                         }
-                        .buttonStyle(.plain)
-                        Text(task.title)
                     }
                 }
             }
         }
         .navigationTitle("Inbox")
     }
-}
-
-
-#Preview {
-   InboxView()
-        .environmentObject(TaskStore())
+    
+    private func save() {
+        do { try context.save() }
+        catch { print("Save error:", error) }
+    }
+    
+    private func startOfTomorrow() -> Date {
+        let cal = Calendar.current
+        let startToday = cal.startOfDay(for: Date())
+        return cal.date(byAdding: .day, value: 1, to: startToday) ?? Date()
+    }
 }

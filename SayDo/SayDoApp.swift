@@ -6,14 +6,16 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct SayDoApp: App {
-    @StateObject private var store = TaskStore()
     var body: some Scene {
         WindowGroup {
-           RootView()
-                .environmentObject(store)
+            RootView()
         }
+        .modelContainer(for: TaskModel.self)
     }
 }
+
+

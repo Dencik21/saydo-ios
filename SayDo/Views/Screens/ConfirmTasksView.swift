@@ -1,0 +1,181 @@
+import SwiftUI
+
+struct ConfirmTasksView: View {
+    let drafts: [TaskDraft]
+
+    let onCancel: () -> Void
+    let onDelete: (TaskDraft) -> Void
+    let onUpdate: (TaskDraft) -> Void
+    let onConfirm: () -> Void
+
+    private var grouped: [(title: String, items: [TaskDraft])] {
+        let cal = Calendar.current
+        let now = Date()
+
+        func sectionTitle(for date: Date?) -> String {
+            guard let d = date else { return "Без даты" }
+            if cal.isDateInToday(d) { return "Сегодня" }
+            if cal.isDateInTomorrow(d) { return "Завтра" }
+            if let weekEnd = cal.date(byAdding: .day, value: 7, to: now),
+               d < weekEnd { return "На этой неделе" }
+            return "Позже"
+        }
+
+        let dict = Dictionary(grouping: drafts) { sectionTitle(for: $0.dueDate) }
+
+        let order = ["Сегодня", "Завтра", "На этой неделе", "Позже", "Без даты"]
+        return order.compactMap { key in
+            guard let items = dict[key] else { return nil }
+            let sorted = items.sorted {
+                // сначала по дате, потом по названию
+                switch ($0.dueDate, $1.dueDate) {
+                case let (a?, b?): return a < b
+                case (nil, _?): return false
+                case (_?, nil): return true
+                case (nil, nil): return $0.title < $1.title
+                }
+            }
+            return (key, sorted)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Найдено задач: \(drafts.count)")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(grouped, id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.items) { draft in
+                            NavigationLink {
+                                EditDraftView(draft: draft, onSave: onUpdate)
+                            } label: {
+                                DraftRow(draft: draft)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    onDelete(draft)
+                                } label: {
+                                    Label("Удалить", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Подтверждение")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Отмена") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Добавить") { onConfirm() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Row
+
+private struct DraftRow: View {
+    let draft: TaskDraft
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(draft.title.isEmpty ? "Без названия" : draft.title)
+                .lineLimit(2)
+
+            if let d = draft.dueDate {
+                Text(d.formatted(date: .abbreviated, time: .shortened))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Без даты")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Edit screen
+
+private struct EditDraftView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State var draft: TaskDraft
+    let onSave: (TaskDraft) -> Void
+
+    var body: some View {
+        Form {
+            Section("Задача") {
+                TextField("Название", text: $draft.title)
+            }
+
+            Section("Дата") {
+                Toggle(
+                    "Есть дата",
+                    isOn: Binding(
+                        get: { draft.dueDate != nil },
+                        set: { hasDate in
+                            if hasDate {
+                                draft.dueDate = draft.dueDate ?? Date()
+                            } else {
+                                draft.dueDate = nil
+                            }
+                        }
+                    )
+                )
+
+                if let date = draft.dueDate {
+                    DatePicker(
+                        "Когда",
+                        selection: Binding(
+                            get: { date },
+                            set: { draft.dueDate = $0 }
+                        ),
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                }
+            }
+        }
+        .navigationTitle("Редактировать")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Сохранить") {
+                    onSave(draft)
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+#Preview("ConfirmTasksView") {
+    let cal = Calendar.current
+    let now = Date()
+
+    let drafts: [TaskDraft] = [
+        TaskDraft(title: "Позвонить врачу", dueDate: now),
+        TaskDraft(title: "Купить продукты", dueDate: now),
+
+        TaskDraft(title: "Спортзал (ноги)", dueDate: cal.date(byAdding: .day, value: 1, to: now)),
+        TaskDraft(title: "Оплатить счёт", dueDate: cal.date(byAdding: .day, value: 3, to: now)),
+
+        TaskDraft(title: "Записаться на термин", dueDate: cal.date(byAdding: .day, value: 10, to: now)),
+        TaskDraft(title: "Ресторан с друзьями", dueDate: nil)
+    ]
+
+    return ConfirmTasksView(
+        drafts: drafts,
+        onCancel: { print("Cancel") },
+        onDelete: { draft in print("Delete:", draft.title) },
+        onUpdate: { draft in print("Update:", draft.title) },
+        onConfirm: { print("Confirm") }
+    )
+}

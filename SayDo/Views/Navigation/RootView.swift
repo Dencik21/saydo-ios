@@ -1,34 +1,31 @@
-//
-//  RootView.swift
-//  SayDo
-//
-//  Created by Denys Ilchenko on 17.02.26.
-//
-
 import SwiftUI
+
+
 
 struct RootView: View {
     var body: some View {
         TabView {
-            NavigationStack {
-                InboxView()
-            }
-            .tabItem { Label("Inbox", systemImage: "tray") }
+            NavigationStack { InboxView() }
+                .tabItem { Label("Inbox", systemImage: "tray") }
 
-            NavigationStack {
-                RecordView()
-            }
-            .tabItem { Label("Record", systemImage: "mic") }
+            NavigationStack { TodayView() }
+                .tabItem { Label("Today", systemImage: "sun.max") }
 
-            NavigationStack {
-                UpcomingView()
-            }
-            .tabItem { Label("Plan", systemImage: "calendar") }
+            NavigationStack { UpcomingView() }
+                .tabItem { Label("Upcoming", systemImage: "calendar") }
+
+            NavigationStack { CaptureView() }
+                .tabItem { Label("Capture", systemImage: "mic") }
+
+            // ✅ Временная вкладка для диагностики
+            NavigationStack { DebugAllTasksView() }
+                .tabItem { Label("Debug", systemImage: "ladybug") }
         }
     }
 }
 
+
 #Preview {
     RootView()
-        .environmentObject(TaskStore())
+       
 }

@@ -6,37 +6,76 @@
 //
 
 import SwiftUI
-
+import SwiftData
 
 struct UpcomingView: View {
-    @EnvironmentObject private var store: TaskStore
-    @StateObject private var vm = UpcomingViewModel()
+    @Environment(\.modelContext) private var context
+    @Query private var tasks: [TaskModel]
+
+    init() {
+        _tasks = Query(
+            filter: #Predicate<TaskModel> { task in
+                task.isDone == false && task.dueDate != nil
+            },
+            sort: [SortDescriptor(\TaskModel.dueDate, order: .forward)]
+        )
+    }
 
     var body: some View {
         List {
-            ForEach(vm.makeSections(from: store.tasks)) { section in
-                Section(header: Text(section.title)) {
-                    ForEach(section.taskIDs, id: \.self) { id in
-                        if let binding = binding(for: id) {
-                            TaskRow(task: binding)
+            if tasks.isEmpty {
+                Text("Будущих задач нет")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(groupedKeys, id: \.self) { key in
+                    Section(sectionTitle(for: key)) {
+                        ForEach(grouped[key] ?? []) { task in
+                            TaskRow(task: task)
+                                .swipeActions(edge: .trailing) {
+                                    Button("Inbox") { task.dueDate = nil; save() }
+                                        .tint(.orange)
+                                    Button("Удалить", role: .destructive) {
+                                        context.delete(task); save()
+                                    }
+                                }
                         }
                     }
                 }
             }
         }
-        .navigationTitle("Plan")
+        .navigationTitle("Upcoming")
     }
 
-    private func binding(for id: UUID) -> Binding<TaskItem>? {
-        guard let idx = store.tasks.firstIndex(where: { $0.id == id }) else { return nil }
-        return $store.tasks[idx]
+    // MARK: - Grouping
+
+    private var grouped: [Date: [TaskModel]] {
+        let cal = Calendar.current
+        return Dictionary(grouping: tasks) { task in
+            cal.startOfDay(for: task.dueDate!)
+        }
     }
+
+    private var groupedKeys: [Date] {
+        grouped.keys.sorted()
+    }
+
+    private func sectionTitle(for day: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "Сегодня" }
+        if cal.isDateInTomorrow(day) { return "Завтра" }
+
+        // "Среда, 19 февраля"
+        return day.formatted(.dateTime.weekday(.wide).day().month(.wide))
+    }
+
+    private func save() { try? context.save() }
 }
 
 
 #Preview {
     NavigationStack {
         UpcomingView()
-            .environmentObject(TaskStore())
     }
+    .modelContainer(for: TaskModel.self, inMemory: true)
 }
+
