@@ -8,6 +8,9 @@ final class TaskModel {
     var dueDate: Date?
     var isDone: Bool
     var createdAt: Date
+    var reminderEnabled: Bool = false
+    var reminderMinutesBefore: Int = 10
+    var notificationID: String? = nil
 
     init(
         id: UUID = UUID(),

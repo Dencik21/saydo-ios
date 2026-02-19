@@ -31,23 +31,37 @@ struct CaptureView: View {
                     onDelete: { vm.deleteDraft($0) },
                     onUpdate: { vm.updateDraft($0) },
                     onConfirm: {
-                        // ✅ vm.confirmedTasks() уже возвращает [TaskModel]
                         let models = vm.confirmedTasks()
 
-                        // Вставляем модели в SwiftData
                         for m in models {
+                            // если у задачи есть дата — можем включать напоминание по умолчанию (пока так)
+                            if m.dueDate != nil {
+                                m.reminderEnabled = true
+                                m.reminderMinutesBefore = 10
+                                if m.notificationID == nil { m.notificationID = UUID().uuidString }
+                            } else {
+                                m.reminderEnabled = false
+                            }
+
                             context.insert(m)
                         }
 
                         do {
                             try context.save()
-                            // print("✅ Saved:", models.count)
                         } catch {
                             print("❌ Save error:", error)
                         }
 
+                        // Планируем уведомления уже после сохранения
+                        Task {
+                            for m in models {
+                                await scheduleIfNeeded(task: m)
+                            }
+                        }
+
                         vm.reset()
                     }
+
                 )
             }
         }
@@ -146,6 +160,30 @@ struct CaptureView: View {
         }
     }
 
+    
+    private func scheduleIfNeeded(task: TaskModel) async {
+        guard let id = task.notificationID else { return }
+
+        guard task.isDone == false,
+              task.reminderEnabled,
+              let due = task.dueDate
+        else {
+            await NotificationService.shared.cancel(id: id)
+            return
+        }
+
+        let ok = await NotificationService.shared.requestAuthIfNeeded()
+        guard ok else { return }
+
+        let fireDate = due.addingTimeInterval(TimeInterval(-task.reminderMinutesBefore * 60))
+        guard fireDate > Date() else {
+            await NotificationService.shared.cancel(id: id)
+            return
+        }
+
+        await NotificationService.shared.schedule(id: id, title: task.title, fireDate: fireDate)
+    }
+
     // MARK: - Helpers
 
     private var isProcessing: Bool {
@@ -185,6 +223,7 @@ private struct ProgressOverlay: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
+    
 }
 
 #Preview {

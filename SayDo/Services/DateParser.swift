@@ -10,65 +10,65 @@ final class DateParser {
 
     private let calendar: Calendar
     private let locale: Locale
+    private let now: () -> Date   // ✅ для тестов
 
-    init(calendar: Calendar = .current,
-         locale: Locale = Locale(identifier: "ru_RU")) {
+    init(
+        calendar: Calendar = .current,
+        locale: Locale = Locale(identifier: "ru_RU"),
+        now: @escaping () -> Date = Date.init
+    ) {
         self.calendar = calendar
         self.locale = locale
+        self.now = now
     }
 
-    /// Парсит одну фразу (одну задачу) и возвращает:
-    /// - Date? (если нашли дату или время)
-    /// - String (очищенный title)
     func parse(from text: String) -> (Date?, String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return (nil, "") }
 
         var result = ParseResult(date: nil, time: nil, title: normalize(trimmed))
 
-        // 0) Относительные даты: сегодня/завтра/послезавтра
+        // 0) сегодня/завтра/послезавтра
         if let rel = extractRelativeDate(from: result.title) {
             result.date = rel.date
             result.title = rel.cleanedTitle
         }
 
-        // 1) Время HH:MM (может быть "в 14:30" или "14:30")
+        // 1) HH:MM
         if let time = extractTimeHHMM(from: result.title) {
             result.time = time
             result.title = removeFirstMatch(from: result.title, pattern: Patterns.timeHHMM)
         }
 
-        // 2) Время "в 17" (и НЕ "22-го")
+        // 2) "в 17" (и НЕ "22-го")
         if result.time == nil, let time = extractTimeHourOnly(from: result.title) {
             result.time = time
             result.title = removeFirstMatch(from: result.title, pattern: Patterns.timeHourOnly)
         }
 
-        // 3) Цифровая дата: 24.02 / 24/02 / 24-02 (опционально год)
+        // 3) 24.02 / 24-02 / 24/02 (+год)
         if result.date == nil, let d = extractNumericDate(from: result.title) {
             result.date = d.date
             result.title = d.cleanedTitle
         }
 
-        // 4) Полная дата: "3 марта"
+        // 4) "3 марта"
         if result.date == nil, let date = extractFullDate(from: result.title) {
             result.date = date
             result.title = removeFirstMatch(from: result.title, pattern: Patterns.fullDate)
         }
 
-        // 5) День месяца ТОЛЬКО с маркером: "22-го", "22 числа", (по желанию "22 день/дня")
+        // 5) "22-го" / "22 числа" / "22 день"
         if result.date == nil, let day = extractDayOfMonthMarked(from: result.title) {
             result.date = buildNearestFutureDateFromDay(day)
             result.title = removeFirstMatch(from: result.title, pattern: Patterns.dayMarked)
         }
 
-        // Если ничего не нашли — просто отдаём title
         if result.date == nil && result.time == nil {
             return (nil, cleanTitle(result.title))
         }
 
-        // Если даты нет, но время есть — базовая дата = сегодня
-        let base = result.date ?? calendar.startOfDay(for: Date())
+        let base = result.date ?? calendar.startOfDay(for: now())
         let finalDate = merge(date: base, time: result.time)
 
         return (finalDate, cleanTitle(result.title))
@@ -80,12 +80,10 @@ final class DateParser {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         s = s.lowercased(with: locale)
 
-        // "22 - го" -> "22-го"
         s = s.replacingOccurrences(of: #"\s*-\s*"#,
                                    with: "-",
                                    options: .regularExpression)
 
-        // множественные пробелы -> один
         s = s.replacingOccurrences(of: #"\s+"#,
                                    with: " ",
                                    options: .regularExpression)
@@ -95,11 +93,8 @@ final class DateParser {
 
     private func cleanTitle(_ text: String) -> String {
         var s = text
-
-        // Убираем лишние пробелы/тире
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: #"(^-|-$)"#, with: "", options: .regularExpression)
-
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -111,10 +106,9 @@ final class DateParser {
 
         static let fullDate = #"\b\d{1,2}\s*(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b"#
 
-        // ✅ ВАЖНО: день месяца — только с явным маркером, никаких голых чисел
-        static let dayMarked = #"\b\d{1,2}\s*(?:-?\s*го|\s*числа|\s*дня|\s*день)\b"#
+        static let dayMarked =
+        #"\b\d{1,2}\s*(?:-?\s*(?:го|е)|\s*числа|\s*дня|\s*день)\b"#
 
-        // 24.02 / 24/02 / 24-02 (+ опционально год)
         static let numericDate = #"\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b"#
     }
 
@@ -126,7 +120,7 @@ final class DateParser {
     }
 
     private func extractRelativeDate(from t: String) -> RelativeDateExtraction? {
-        let now = Date()
+        let now = now()
         let todayStart = calendar.startOfDay(for: now)
 
         func removeWord(_ word: String, from s: String) -> String {
@@ -214,8 +208,8 @@ final class DateParser {
             }
         }
 
-        let now = Date()
-        let currentYear = calendar.component(.year, from: now)
+        let nowDate = now()
+        let currentYear = calendar.component(.year, from: nowDate)
         let usedYear = year ?? currentYear
 
         var comps = DateComponents()
@@ -227,8 +221,7 @@ final class DateParser {
 
         guard var date = calendar.date(from: comps) else { return nil }
 
-        // Если год не был задан и дата уже прошла — переносим на следующий год
-        if year == nil, calendar.startOfDay(for: date) < calendar.startOfDay(for: now) {
+        if year == nil, calendar.startOfDay(for: date) < calendar.startOfDay(for: nowDate) {
             if let next = calendar.date(byAdding: .year, value: 1, to: date) {
                 date = next
             }
@@ -251,7 +244,7 @@ final class DateParser {
         guard let match = regex.firstMatch(in: t, range: range),
               let fullRange = Range(match.range, in: t) else { return nil }
 
-        let chunk = String(t[fullRange]) // "3 марта"
+        let chunk = String(t[fullRange])
         let parts = chunk.split(separator: " ")
         guard parts.count >= 2 else { return nil }
 
@@ -259,8 +252,9 @@ final class DateParser {
         let monthName = String(parts[1])
         guard (1...31).contains(day), let month = months[monthName] else { return nil }
 
-        let now = Date()
-        var comps = calendar.dateComponents([.year], from: now)
+        let nowDate = now()
+
+        var comps = calendar.dateComponents([.year], from: nowDate)
         comps.month = month
         comps.day = day
         comps.hour = 9
@@ -268,8 +262,7 @@ final class DateParser {
 
         guard var date = calendar.date(from: comps) else { return nil }
 
-        // Если такая дата уже прошла — переносим на следующий год
-        if calendar.startOfDay(for: date) < calendar.startOfDay(for: now) {
+        if calendar.startOfDay(for: date) < calendar.startOfDay(for: nowDate) {
             if let nextYear = calendar.date(byAdding: .year, value: 1, to: date) {
                 date = nextYear
             }
@@ -285,7 +278,7 @@ final class DateParser {
         guard let match = regex.firstMatch(in: t, range: range),
               let fullRange = Range(match.range, in: t) else { return nil }
 
-        let chunk = String(t[fullRange]) // "22-го" / "22 числа"
+        let chunk = String(t[fullRange])
         let numberPattern = #"\b(\d{1,2})\b"#
         guard let numRegex = try? NSRegularExpression(pattern: numberPattern) else { return nil }
 
@@ -301,10 +294,10 @@ final class DateParser {
     // MARK: - Nearest future day logic
 
     private func buildNearestFutureDateFromDay(_ day: Int) -> Date {
-        let now = Date()
-        let todayStart = calendar.startOfDay(for: now)
+        let nowDate = now()
+        let todayStart = calendar.startOfDay(for: nowDate)
 
-        var comps = calendar.dateComponents([.year, .month], from: now)
+        var comps = calendar.dateComponents([.year, .month], from: nowDate)
         comps.day = day
         comps.hour = 9
         comps.minute = 0
@@ -318,9 +311,9 @@ final class DateParser {
     }
 
     private func buildDateInNextMonth(day: Int, hour: Int, minute: Int) -> Date {
-        let now = Date()
+        let nowDate = now()
 
-        var comps = calendar.dateComponents([.year, .month], from: now)
+        var comps = calendar.dateComponents([.year, .month], from: nowDate)
         comps.day = 1
         comps.hour = hour
         comps.minute = minute
@@ -328,7 +321,7 @@ final class DateParser {
         guard let thisMonthFirst = calendar.date(from: comps),
               let nextMonthFirst = calendar.date(byAdding: .month, value: 1, to: thisMonthFirst),
               let range = calendar.range(of: .day, in: .month, for: nextMonthFirst) else {
-            return now
+            return nowDate
         }
 
         let safeDay = min(day, range.count)
@@ -338,7 +331,7 @@ final class DateParser {
         next.hour = hour
         next.minute = minute
 
-        return calendar.date(from: next) ?? now
+        return calendar.date(from: next) ?? nowDate
     }
 
     // MARK: - Merge

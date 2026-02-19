@@ -23,6 +23,7 @@ struct InboxView: View {
             } else {
                 ForEach(tasks) { task in
                     TaskRow(task: task)
+                        .cardRowStyle()
                         .swipeActions(edge: .trailing) {
                             Button("Today") {
                                 let cal = Calendar.current
@@ -46,6 +47,7 @@ struct InboxView: View {
                 }
             }
         }
+        .cardListStyle()
         .navigationTitle("Inbox")
     }
     

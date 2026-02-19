@@ -45,6 +45,7 @@ struct TaskListView: View {
                 }
             }
         }
+        .cardListStyle()
         .navigationTitle("Список задач")
     }
 }
