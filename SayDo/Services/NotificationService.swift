@@ -42,7 +42,11 @@ final class NotificationService {
         content.title = title
         content.sound = .default
         
-        let comps = Calendar.current.dateComponents([.year, .day, .month, .hour, .minute], from: fireDate)
+        let comps = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: fireDate
+        )
+
         
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         
