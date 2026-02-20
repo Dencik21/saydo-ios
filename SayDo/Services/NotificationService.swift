@@ -35,29 +35,33 @@ final class NotificationService {
     }
     
     func schedule(id: String, title: String, fireDate: Date) async {
-        let center = UNUserNotificationCenter.current()
-        await center.removePendingNotificationRequests(withIdentifiers: [id])
+           let center = UNUserNotificationCenter.current()
 
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.sound = .default
-        
-        let comps = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: fireDate
-        )
+           center.removePendingNotificationRequests(withIdentifiers: [id])
 
-        
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-        
-        let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-               try? await center.add(req)
-        
-    }
+           let content = UNMutableNotificationContent()
+           content.title = title
+           content.sound = .default
+
+           let comps = Calendar.current.dateComponents(
+               [.year, .month, .day, .hour, .minute],
+               from: fireDate
+           )
+
+           let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+           let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+
+           do {
+               try await center.add(req) // ✅ вот это реально async
+           } catch {
+               // можно логнуть, если хочешь
+           }
+       }
+
     
     func cancel(id: String) async {
         let center = UNUserNotificationCenter.current()
-        await center.removePendingNotificationRequests(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id])
         
     }
     

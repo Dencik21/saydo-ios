@@ -39,6 +39,8 @@ final class SpeechService: NSObject {
 
     private var isRunning = false
     private var currentContinuation: AsyncThrowingStream<String, Error>.Continuation?
+    
+    private let beautifier = TextBeautifier()
 
     override init() {
         super.init()
@@ -85,7 +87,18 @@ final class SpeechService: NSObject {
         request.shouldReportPartialResults = true
         if #available(iOS 16.0, *) { request.addsPunctuation = true }
 
+        request.requiresOnDeviceRecognition = false
+        request.contextualStrings = [
+            "спортзал",
+            "записаться",
+            "позвонить",
+            "термин",
+            "встреча",
+            "проект",
+            "идея"
+        ]
         recognitionRequest = request
+       
 
         // Настраиваем аудио-сессию
         try configureAudioSession()
@@ -95,7 +108,7 @@ final class SpeechService: NSObject {
         inputNode.removeTap(onBus: 0)
 
         let format = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             self.recognitionRequest?.append(buffer)
         }
@@ -114,27 +127,31 @@ final class SpeechService: NSObject {
 
             self.currentContinuation = continuation
 
-            self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+           self.recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 guard let self else { return }
-
-                if let result {
-                    continuation.yield(result.bestTranscription.formattedString)
-
-                    // если финал — аккуратно завершаем всё
-                    if result.isFinal {
-                        self.finishStream()
-                    }
-                }
 
                 if let error {
                     self.finishStream(throwing: error)
+                    return
+                }
+
+                guard let result else { return }
+
+                let raw = result.bestTranscription.formattedString
+
+                if result.isFinal {
+                    let cleaned = self.beautifier.beautify(raw)
+                    continuation.yield(cleaned)
+                    self.finishStream()
+                } else {
+                    continuation.yield(raw)
                 }
             }
 
             continuation.onTermination = { [weak self] _ in
-                // пользователь перестал слушать — стопаем
-                Task { @MainActor in
-                    self?.stop()
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.stop()
                 }
             }
         }

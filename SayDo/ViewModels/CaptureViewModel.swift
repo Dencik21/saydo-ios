@@ -28,7 +28,7 @@ final class CaptureViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>? = nil
 
     private let beautifier = TextBeautifier()
-    private let extractor = TaskExtractor() // теперь extractor выдаёт [TaskModel]
+    private let extractor = TaskExtractor() // extractor.extract(from:) -> [TaskModel]
 
     // MARK: - Permissions
 
@@ -44,6 +44,7 @@ final class CaptureViewModel: ObservableObject {
     func start() {
         guard !isRecording else { return }
 
+        // чистим UI
         liveTranscript = ""
         finalTranscript = ""
         phase = .listening
@@ -53,6 +54,9 @@ final class CaptureViewModel: ObservableObject {
 
             let stream = try speechService.startTranscribing()
             isRecording = true
+
+            // ✅ отменяем предыдущий таск, если вдруг остался
+            streamTask?.cancel()
 
             streamTask = Task { [weak self] in
                 guard let self else { return }
@@ -65,11 +69,15 @@ final class CaptureViewModel: ObservableObject {
                         self.liveTranscript = text
                     }
                 } catch {
+                    // если мы остановили запись вручную — это может прилететь как cancel/error,
+                    // но мы всё равно попробуем обработать то, что успели получить
+                    self.finalTranscript = lastText.isEmpty ? self.liveTranscript : lastText
                     self.isRecording = false
-                    self.phase = .error(error.localizedDescription)
+                    await self.processToDraftsAndOpenReview()
                     return
                 }
 
+                // Стрим завершился нормально
                 self.finalTranscript = lastText
                 self.isRecording = false
 
@@ -85,14 +93,17 @@ final class CaptureViewModel: ObservableObject {
     func stop() {
         guard isRecording else { return }
 
+        // ✅ важно: НЕ cancel streamTask — пусть он сам завершится
         speechService.stop()
-        streamTask?.cancel()
-        streamTask = nil
 
         isRecording = false
-        finalTranscript = finalTranscript.isEmpty ? liveTranscript : finalTranscript
+        // финальный текст доберём из lastText в streamTask, но на всякий случай:
+        if finalTranscript.isEmpty {
+            finalTranscript = liveTranscript
+        }
 
-        Task { await processToDraftsAndOpenReview() }
+        // ⚠️ НЕ запускаем processToDraftsAndOpenReview() отсюда,
+        // иначе получишь двойной вызов (и двойной review)
     }
 
     func reset() {
@@ -113,15 +124,32 @@ final class CaptureViewModel: ObservableObject {
         phase = .processing
 
         let raw = finalTranscript.isEmpty ? liveTranscript : finalTranscript
-        let pretty = beautifier.beautify(raw)
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // ✅ extractor теперь возвращает [TaskModel]
-        let models = extractor.extract(from: pretty)
+        guard !trimmed.isEmpty else {
+            phase = .error("Пусто 😅 Скажи что-нибудь ещё раз.")
+            return
+        }
 
-        // ✅ конвертим в черновики (удобно редактировать)
+        // ✅ 1) Сначала делим диктовку на части (через beautifier)
+        // splitTasks внутри вызывает beautify и потом режет по пунктуации
+        let parts = beautifier.splitTasks(trimmed)
+
+        // ✅ 2) Extract для каждой части отдельно — это ключ к нормальному разбиению
+        let models: [TaskModel] = parts.flatMap { part in
+            extractor.extract(from: part)
+        }
+
+        // ✅ 3) В drafts
         let drafts = models
             .map { TaskDraft(title: $0.title, dueDate: $0.dueDate) }
-            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { d in
+                // чистим заголовок
+                var copy = d
+                copy.title = copy.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return copy
+            }
+            .filter { !$0.title.isEmpty }
 
         if drafts.isEmpty {
             phase = .error("Не нашёл задач в сообщении 😅 Попробуй сказать чуть конкретнее.")
@@ -153,7 +181,11 @@ final class CaptureViewModel: ObservableObject {
     func confirmedTasks() -> [TaskModel] {
         guard case .review(let drafts) = phase else { return [] }
         return drafts.map { d in
-            TaskModel(title: d.title, dueDate: d.dueDate, isDone: false, createdAt: .now)
+            let m = TaskModel(title: d.title, dueDate: d.dueDate, isDone: false, createdAt: .now)
+            m.reminderEnabled = d.reminderEnabled
+            m.reminderMinutesBefore = d.reminderMinutesBefore
+            m.notificationID = d.reminderEnabled ? (UUID().uuidString) : nil
+            return m
         }
     }
 }

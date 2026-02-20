@@ -8,6 +8,12 @@ struct ConfirmTasksView: View {
     let onUpdate: (TaskDraft) -> Void
     let onConfirm: () -> Void
 
+    // ✅ массовые настройки
+    @State private var bulkReminderEnabled: Bool = false
+    @State private var bulkMinutes: Int = 10
+
+    private let minuteOptions = [5, 10, 15, 30, 60]
+
     private var grouped: [(title: String, items: [TaskDraft])] {
         let cal = Calendar.current
         let now = Date()
@@ -27,7 +33,6 @@ struct ConfirmTasksView: View {
         return order.compactMap { key in
             guard let items = dict[key] else { return nil }
             let sorted = items.sorted {
-                // сначала по дате, потом по названию
                 switch ($0.dueDate, $1.dueDate) {
                 case let (a?, b?): return a < b
                 case (nil, _?): return false
@@ -45,6 +50,23 @@ struct ConfirmTasksView: View {
                 Section {
                     Text("Найдено задач: \(drafts.count)")
                         .foregroundStyle(.secondary)
+                }
+
+                // ✅ Массовые действия для напоминаний
+                Section("Напоминания") {
+                    Toggle("Напоминать всем", isOn: $bulkReminderEnabled)
+
+                    Picker("За сколько минут", selection: $bulkMinutes) {
+                        ForEach(minuteOptions, id: \.self) { m in
+                            Text("\(m) мин").tag(m)
+                        }
+                    }
+                    .disabled(!bulkReminderEnabled)
+
+                    Button("Применить ко всем задачам") {
+                        applyBulkReminder()
+                    }
+                    .disabled(drafts.isEmpty)
                 }
 
                 ForEach(grouped, id: \.title) { group in
@@ -78,6 +100,24 @@ struct ConfirmTasksView: View {
             }
         }
     }
+
+    // MARK: - Bulk apply
+
+    private func applyBulkReminder() {
+        for d in drafts {
+            var updated = d
+
+            // ✅ Если у задачи нет даты — напоминание бессмысленно, выключаем
+            if updated.dueDate == nil {
+                updated.reminderEnabled = false
+            } else {
+                updated.reminderEnabled = bulkReminderEnabled
+                updated.reminderMinutesBefore = bulkMinutes
+            }
+
+            onUpdate(updated)
+        }
+    }
 }
 
 // MARK: - Row
@@ -87,8 +127,21 @@ private struct DraftRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(draft.title.isEmpty ? "Без названия" : draft.title)
-                .lineLimit(2)
+            HStack(spacing: 8) {
+                Text(draft.title.isEmpty ? "Без названия" : draft.title)
+                    .lineLimit(2)
+
+                Spacer()
+
+                if draft.reminderEnabled, draft.dueDate != nil {
+                    Text("⏰ \(draft.reminderMinutesBefore) мин")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                }
+            }
 
             if let d = draft.dueDate {
                 Text(d.formatted(date: .abbreviated, time: .shortened))
@@ -112,6 +165,8 @@ private struct EditDraftView: View {
     @State var draft: TaskDraft
     let onSave: (TaskDraft) -> Void
 
+    private let minuteOptions = [5, 10, 15, 30, 60]
+
     var body: some View {
         Form {
             Section("Задача") {
@@ -128,6 +183,8 @@ private struct EditDraftView: View {
                                 draft.dueDate = draft.dueDate ?? Date()
                             } else {
                                 draft.dueDate = nil
+                                // ✅ если даты нет — напоминание тоже выключаем
+                                draft.reminderEnabled = false
                             }
                         }
                     )
@@ -142,6 +199,33 @@ private struct EditDraftView: View {
                         ),
                         displayedComponents: [.date, .hourAndMinute]
                     )
+                }
+            }
+
+            // ✅ Напоминание
+            Section("Напоминание") {
+                Toggle(
+                    "Напомнить",
+                    isOn: Binding(
+                        get: { draft.reminderEnabled && draft.dueDate != nil },
+                        set: { on in
+                            // без даты не даём включить
+                            if draft.dueDate == nil {
+                                draft.reminderEnabled = false
+                            } else {
+                                draft.reminderEnabled = on
+                            }
+                        }
+                    )
+                )
+                .disabled(draft.dueDate == nil)
+
+                if draft.reminderEnabled, draft.dueDate != nil {
+                    Picker("За сколько минут", selection: $draft.reminderMinutesBefore) {
+                        ForEach(minuteOptions, id: \.self) { m in
+                            Text("\(m) мин").tag(m)
+                        }
+                    }
                 }
             }
         }

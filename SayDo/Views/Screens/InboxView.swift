@@ -26,7 +26,7 @@ struct InboxView: View {
                         .cardRowStyle()
                         .swipeActions(edge: .trailing) {
                             Button("Today") {
-                                let cal = Calendar.current
+                               
                                 task.dueDate = Calendar.current.startOfDay(for: Date())
                                 save()
                             }

@@ -34,13 +34,17 @@ struct CaptureView: View {
                         let models = vm.confirmedTasks()
 
                         for m in models {
-                            // если у задачи есть дата — можем включать напоминание по умолчанию (пока так)
-                            if m.dueDate != nil {
-                                m.reminderEnabled = true
-                                m.reminderMinutesBefore = 10
-                                if m.notificationID == nil { m.notificationID = UUID().uuidString }
+                            // ✅ не навязываем напоминание
+                            // reminderEnabled по умолчанию false (в TaskModel так и есть)
+
+                            if m.reminderEnabled {
+                                // если юзер когда-то включит — тогда нужен id
+                                if m.notificationID == nil {
+                                    m.notificationID = UUID().uuidString
+                                }
                             } else {
-                                m.reminderEnabled = false
+                                // если напоминания нет — id не нужен
+                                m.notificationID = nil
                             }
 
                             context.insert(m)
@@ -52,7 +56,7 @@ struct CaptureView: View {
                             print("❌ Save error:", error)
                         }
 
-                        // Планируем уведомления уже после сохранения
+                        // ✅ планируем только тем, кому надо
                         Task {
                             for m in models {
                                 await scheduleIfNeeded(task: m)
@@ -61,7 +65,6 @@ struct CaptureView: View {
 
                         vm.reset()
                     }
-
                 )
             }
         }

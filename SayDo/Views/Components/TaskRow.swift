@@ -33,8 +33,13 @@ struct TaskRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if task.reminderEnabled, task.isDone == false {
+                       Image(systemName: "alarm")
+                           .font(.caption2)
+                           .foregroundStyle(.secondary)
+                   }
             }
-
+           
             Spacer()
         }
         .padding(.vertical, 12)
@@ -47,12 +52,16 @@ struct TaskRow: View {
         .contentShape(Rectangle()) // чтобы тап по карточке работал везде
     }
 
-    private func russianDate(_ date: Date) -> String {
+    private static let ruFormatter: DateFormatter = {
         let df = DateFormatter()
         df.locale = Locale(identifier: "ru_RU")
         df.calendar = Calendar(identifier: .gregorian)
         df.dateFormat = "d MMMM yyyy"
-        return df.string(from: date)
+        return df
+    }()
+
+    private func russianDate(_ date: Date) -> String {
+        Self.ruFormatter.string(from: date)
     }
 }
 

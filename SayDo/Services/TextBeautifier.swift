@@ -22,7 +22,6 @@ final class TextBeautifier {
         }
 
         // 3) Глаголы-действия → ставим точку ПЕРЕД новым действием (если оно не в начале)
-        //    Важно: это НЕ должно добавлять точки перед числами.
         let verbs = [
             "купить","пойти","сходить","записаться",
             "позвонить","написать","сделать",
@@ -31,14 +30,10 @@ final class TextBeautifier {
             "посидеть","погулять"
         ]
 
-        // Одна замена на все глаголы: " ... <verb> ..." -> ". <verb> ..."
-        // (?<!^) — не в начале строки
-        // \b — граница слова, чтобы не цеплять куски слов
         let verbsPattern = #"(?<!^)\s+\b("# + verbs.joined(separator: "|") + #")\b"#
         t = t.replacingOccurrences(of: verbsPattern, with: ". $1", options: .regularExpression)
 
-        // 4) Мягко делим по " и " только если обе части достаточно длинные (чтобы не ломать "чай и кофе")
-        //    и чтобы не дробить слишком агрессивно.
+        // 4) Мягко делим по " и "
         t = t.replacingOccurrences(
             of: Patterns.softAndSplit,
             with: "$1. $2",
@@ -49,7 +44,7 @@ final class TextBeautifier {
         t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         t = t.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // 6) точка в конце (чтобы деление по пунктуации работало стабильно)
+        // 6) точка в конце
         if let last = t.last, ".!?".contains(last) == false {
             t += "."
         }
@@ -57,10 +52,18 @@ final class TextBeautifier {
         return t
     }
 
+    /// ✅ Новый метод: превращает диктовку в массив задач
+    func splitTasks(_ text: String) -> [String] {
+        let beautified = beautify(text)
+        guard !beautified.isEmpty else { return [] }
+
+        return beautified
+            .components(separatedBy: CharacterSet(charactersIn: ".!?;\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     private enum Patterns {
-        // обе стороны должны начинаться с букв и иметь хотя бы 3 буквы подряд внутри
-        // Пример: "купить молоко и хлеб" -> "купить молоко. хлеб"
-        // Не трогаем: "чай и кофе" (слишком коротко), "iphone 15 и case" (много цифр)
         static let softAndSplit =
         #"\b([а-яa-z][^.!?;]{3,}?)\s+и\s+([а-яa-z][^.!?;]{3,}?)\b"#
     }
