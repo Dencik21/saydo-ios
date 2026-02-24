@@ -1,15 +1,27 @@
+//
+//  CaptureView.swift
+//  SayDo
+//
+//  Updated: Dark + AppBackground style
+//
+
 import SwiftUI
 import SwiftData
+
 
 struct CaptureView: View {
     @Environment(\.modelContext) private var context
     @StateObject private var vm = CaptureViewModel()
+    @EnvironmentObject private var themeManager: ThemeManager
 
-    var body: some View {
+    private var ui: UI { UI(isDark: themeManager.theme == .dark) }
+
+    var body: some View { content }
+
+    private var content: some View {
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 16) {
-                header
-                contentCard
+                statusCard
                 actions
                 Spacer(minLength: 80)
             }
@@ -22,129 +34,102 @@ struct CaptureView: View {
             .padding(.bottom, 18)
         }
         .task { await vm.requestPermission() }
+        .fullScreenCover(isPresented: reviewBinding) { reviewScreen }
+        .overlay {
+            if isProcessing {
+                ProgressOverlay(text: "Обрабатываю…", isDark: ui.isDark)
+            }
+            
+        }
+        .navigationTitle("Capture")
+    }
 
-        .fullScreenCover(isPresented: reviewBinding) {
-            if case .review(let drafts) = vm.phase {
-                ConfirmTasksView(
-                    drafts: drafts,
-                    onCancel: { vm.cancelReview() },
-                    onDelete: { vm.deleteDraft($0) },
-                    onUpdate: { vm.updateDraft($0) },
-                    onConfirm: {
-                        let models = vm.confirmedTasks()
+    
+    private struct ProgressOverlay: View {
+        let text: String
+        let isDark: Bool
 
-                        for m in models {
-                            // ✅ не навязываем напоминание
-                            // reminderEnabled по умолчанию false (в TaskModel так и есть)
+        private var dim: Color { isDark ? Color.black.opacity(0.40) : Color.black.opacity(0.12) }
+        private var labelColor: Color { isDark ? .white.opacity(0.85) : .primary }
+        private var stroke: Color { isDark ? .white.opacity(0.10) : .black.opacity(0.06) }
+        private var material: AnyShapeStyle { isDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial) }
 
-                            if m.reminderEnabled {
-                                // если юзер когда-то включит — тогда нужен id
-                                if m.notificationID == nil {
-                                    m.notificationID = UUID().uuidString
-                                }
-                            } else {
-                                // если напоминания нет — id не нужен
-                                m.notificationID = nil
-                            }
+        var body: some View {
+            ZStack {
+                dim.ignoresSafeArea()
 
-                            context.insert(m)
-                        }
-
-                        do {
-                            try context.save()
-                        } catch {
-                            print("❌ Save error:", error)
-                        }
-
-                        // ✅ планируем только тем, кому надо
-                        Task {
-                            for m in models {
-                                await scheduleIfNeeded(task: m)
-                            }
-                        }
-
-                        vm.reset()
-                    }
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(labelColor)
+                }
+                .padding(18)
+                .background(material)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(stroke, lineWidth: 1)
                 )
             }
         }
-        .overlay {
-            if isProcessing {
-                ProgressOverlay(text: "Обрабатываю…")
+    }
+   
+    
+    // MARK: - Status card
+
+    private var statusCard: some View {
+        Card(ui: ui) {
+            Text(phaseTitle)
+                .font(.title3)
+                .foregroundStyle(ui.primaryText)
+
+            if let subtitle = phaseSubtitle {
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(ui.secondaryText)
             }
-        }
-    }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack {
-            Text("Capture")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - Main card
-
-    private var contentCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            switch vm.phase {
-            case .idle:
-                Text("Нажми на микрофон и говори.")
-                    .font(.title3)
-                Text("Я превращу речь в задачи и покажу их на экране подтверждения.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-            case .listening:
-                Text("Слушаю…")
-                    .font(.title3)
-                Text("Говори спокойно. После остановки я покажу готовые задачи.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-            case .processing:
-                Text("Обрабатываю…")
-                    .font(.title3)
-                Text("Секунду — выделяю задачи и даты.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-            case .review(let drafts):
-                Text("Найдено задач: \(drafts.count)")
-                    .font(.title3)
-                Text("Открой экран подтверждения.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-            case .error(let message):
-                Text("Не получилось 😅")
-                    .font(.title3)
+            if case .error(let message) = vm.phase {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var phaseTitle: String {
+        switch vm.phase {
+        case .idle: return "Нажми на микрофон и говори."
+        case .listening: return "Слушаю…"
+        case .processing: return "Обрабатываю…"
+        case .review(let drafts): return "Найдено задач: \(drafts.count)"
+        case .error: return "Не получилось 😅"
+        }
+    }
+
+    private var phaseSubtitle: String? {
+        switch vm.phase {
+        case .idle:
+            return "Я превращу речь в задачи и покажу их на экране подтверждения."
+        case .listening:
+            return "Говори спокойно. После остановки я покажу готовые задачи."
+        case .processing:
+            return "Секунду — выделяю задачи и даты."
+        case .review:
+            return "Открой экран подтверждения."
+        case .error:
+            return nil
+        }
     }
 
     // MARK: - Actions
 
     private var actions: some View {
         Group {
-            switch vm.phase {
-            case .idle, .listening, .processing, .review:
-                EmptyView()
-
-            case .error:
+            if case .error = vm.phase {
                 HStack(spacing: 12) {
-                    Button {
-                        vm.reset()
-                    } label: {
+                    Button { vm.reset() } label: {
                         Label("Сбросить", systemImage: "xmark.circle")
                             .frame(maxWidth: .infinity)
                     }
@@ -163,7 +148,44 @@ struct CaptureView: View {
         }
     }
 
-    
+    // MARK: - Review Screen
+
+    @ViewBuilder
+    private var reviewScreen: some View {
+        if case .review(let drafts) = vm.phase {
+            ConfirmTasksView(
+                drafts: drafts,
+                onCancel: { vm.cancelReview() },
+                onDelete: { vm.deleteDraft($0) },
+                onUpdate: { vm.updateDraft($0) },
+                onConfirm: { confirmDrafts() }
+            )
+        }
+    }
+
+    private func confirmDrafts() {
+        let models = vm.confirmedTasks()
+
+        for m in models {
+            if m.reminderEnabled {
+                m.notificationID = m.notificationID ?? UUID().uuidString
+            } else {
+                m.notificationID = nil
+            }
+            context.insert(m)
+        }
+
+        do { try context.save() } catch { print("❌ Save error:", error) }
+
+        Task {
+            for m in models { await scheduleIfNeeded(task: m) }
+        }
+
+        vm.reset()
+    }
+
+    // MARK: - Notifications
+
     private func scheduleIfNeeded(task: TaskModel) async {
         guard let id = task.notificationID else { return }
 
@@ -196,37 +218,41 @@ struct CaptureView: View {
 
     private var reviewBinding: Binding<Bool> {
         Binding(
-            get: {
-                if case .review = vm.phase { return true }
-                return false
-            },
-            set: { newValue in
-                if !newValue { vm.cancelReview() }
-            }
+            get: { if case .review = vm.phase { return true } else { return false } },
+            set: { newValue in if !newValue { vm.cancelReview() } }
         )
     }
 }
 
-// MARK: - Overlay
+// MARK: - UI tokens
 
-private struct ProgressOverlay: View {
-    let text: String
+private struct UI {
+    let isDark: Bool
+    var primaryText: Color { isDark ? .white : .primary }
+    var secondaryText: Color { isDark ? .white.opacity(0.75) : .secondary }
+    var stroke: Color { isDark ? .white.opacity(0.10) : .black.opacity(0.06) }
+    var material: AnyShapeStyle { isDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial) }
+}
+
+// MARK: - Card
+
+private struct Card<Content: View>: View {
+    let ui: UI
+    @ViewBuilder var content: Content
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.15).ignoresSafeArea()
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(text)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(18)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        VStack(alignment: .leading, spacing: 10) {
+            content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(ui.material)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(ui.stroke, lineWidth: 1)
+        )
     }
-    
 }
 
 #Preview {
@@ -234,4 +260,5 @@ private struct ProgressOverlay: View {
         CaptureView()
     }
     .modelContainer(for: TaskModel.self, inMemory: true)
+    .environmentObject(ThemeManager()) 
 }

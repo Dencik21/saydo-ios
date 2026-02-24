@@ -25,8 +25,10 @@ struct TodayView: View {
         
         return List {
             if todayTasks.isEmpty {
-                Text("На сегодня задач нет 🎉")
-                    .foregroundStyle(.secondary)
+                EmptyStateCard(
+                       title: "На сегодня задач нет 🎉",
+                       subtitle: "Добавь задачу — она появится здесь."
+                   )
             } else {
                 ForEach(todayTasks) { task in
                     TaskRow(task: task)

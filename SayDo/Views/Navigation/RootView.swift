@@ -1,31 +1,73 @@
 import SwiftUI
 
-
-
 struct RootView: View {
+
+    @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
+    @EnvironmentObject private var themeManager: ThemeManager
+
     var body: some View {
+        Group {
+            if hasOnboarded {
+                mainTabs
+            } else {
+                NavigationStack {
+                    WelcomeView()
+                        .toolbar {
+                            themeToolbar
+                        }
+                }
+            }
+        }
+    }
+
+    // MARK: - Tabs
+
+    private var mainTabs: some View {
         TabView {
-            NavigationStack { InboxView() }
+            navRoot(AppBackground { InboxView() })
                 .tabItem { Label("Inbox", systemImage: "tray") }
 
-            NavigationStack { TodayView() }
+            navRoot(AppBackground { TodayView() })
                 .tabItem { Label("Today", systemImage: "sun.max") }
 
-            NavigationStack { UpcomingView() }
+            navRoot(AppBackground { UpcomingView() })
                 .tabItem { Label("Upcoming", systemImage: "calendar") }
 
-            NavigationStack { CaptureView() }
+            navRoot(AppBackground { CaptureView() })
                 .tabItem { Label("Capture", systemImage: "mic") }
 
-            // ✅ Временная вкладка для диагностики
-            NavigationStack { DebugAllTasksView() }
+            navRoot(AppBackground { DebugAllTasksView() })
                 .tabItem { Label("Debug", systemImage: "ladybug") }
         }
     }
-}
+    // MARK: - Navigation Wrapper (чтобы не копировать toolbar везде)
 
+    private func navRoot<Content: View>(_ content: Content) -> some View {
+        NavigationStack {
+            content
+                .toolbar { themeToolbar }
+        }
+    }
+    // MARK: - Theme Button
+
+    private var themeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                toggleTheme()
+            } label: {
+                Image(systemName: themeManager.theme.iconName)
+            }
+        }
+    }
+
+    // MARK: - Theme Logic
+
+    private func toggleTheme() {
+            themeManager.toggle()
+    }
+}
 
 #Preview {
     RootView()
-       
+        .environmentObject(ThemeManager())
 }

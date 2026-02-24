@@ -9,11 +9,19 @@
 import SwiftUI
 
 struct CardListStyle: ViewModifier {
+    @EnvironmentObject private var themeManager: ThemeManager
+
+    private var isDark: Bool { themeManager.theme == .dark }
+
+    private var overlayTint: Color {
+        isDark ? Color.white.opacity(0.04) : Color.black.opacity(0.03)
+    }
+
     func body(content: Content) -> some View {
         content
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .scrollContentBackground(.hidden)        // убираем системный фон
+                          
     }
 }
 

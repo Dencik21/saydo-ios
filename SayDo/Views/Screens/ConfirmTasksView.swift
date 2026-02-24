@@ -1,5 +1,7 @@
 import SwiftUI
 
+import SwiftUI
+
 struct ConfirmTasksView: View {
     let drafts: [TaskDraft]
 
@@ -8,7 +10,6 @@ struct ConfirmTasksView: View {
     let onUpdate: (TaskDraft) -> Void
     let onConfirm: () -> Void
 
-    // ✅ массовые настройки
     @State private var bulkReminderEnabled: Bool = false
     @State private var bulkMinutes: Int = 10
 
@@ -49,10 +50,9 @@ struct ConfirmTasksView: View {
             List {
                 Section {
                     Text("Найдено задач: \(drafts.count)")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary) // ✅ чёрный/primary, как ты хочешь
                 }
 
-                // ✅ Массовые действия для напоминаний
                 Section("Напоминания") {
                     Toggle("Напоминать всем", isOn: $bulkReminderEnabled)
 
@@ -87,8 +87,15 @@ struct ConfirmTasksView: View {
                         }
                     }
                 }
+               
             }
+            .cardListStyle() // ✅ вот оно
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .background(Color.clear)
+            
             .navigationTitle("Подтверждение")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена") { onCancel() }
@@ -101,20 +108,15 @@ struct ConfirmTasksView: View {
         }
     }
 
-    // MARK: - Bulk apply
-
     private func applyBulkReminder() {
         for d in drafts {
             var updated = d
-
-            // ✅ Если у задачи нет даты — напоминание бессмысленно, выключаем
             if updated.dueDate == nil {
                 updated.reminderEnabled = false
             } else {
                 updated.reminderEnabled = bulkReminderEnabled
                 updated.reminderMinutesBefore = bulkMinutes
             }
-
             onUpdate(updated)
         }
     }
@@ -183,7 +185,6 @@ private struct EditDraftView: View {
                                 draft.dueDate = draft.dueDate ?? Date()
                             } else {
                                 draft.dueDate = nil
-                                // ✅ если даты нет — напоминание тоже выключаем
                                 draft.reminderEnabled = false
                             }
                         }
@@ -202,14 +203,12 @@ private struct EditDraftView: View {
                 }
             }
 
-            // ✅ Напоминание
             Section("Напоминание") {
                 Toggle(
                     "Напомнить",
                     isOn: Binding(
                         get: { draft.reminderEnabled && draft.dueDate != nil },
                         set: { on in
-                            // без даты не даём включить
                             if draft.dueDate == nil {
                                 draft.reminderEnabled = false
                             } else {
@@ -229,7 +228,14 @@ private struct EditDraftView: View {
                 }
             }
         }
+        // ✅ ВАЖНО: это должно быть на Form, а не на Section
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))   // ✅ ВОТ ЭТО
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+
         .navigationTitle("Редактировать")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Сохранить") {
@@ -262,4 +268,5 @@ private struct EditDraftView: View {
         onUpdate: { draft in print("Update:", draft.title) },
         onConfirm: { print("Confirm") }
     )
+    .environmentObject(ThemeManager())
 }

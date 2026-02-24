@@ -8,11 +8,30 @@
 import SwiftUI
 
 struct EmptyStateCard: View {
+    let title: String
+    let subtitle: String
+
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.regularMaterial) // ✅ на светлом лучше читается, чем ultraThin
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(.black.opacity(0.06), lineWidth: 1) // можно сделать адаптивно
+        )
     }
 }
 
 #Preview {
-    EmptyStateCard()
+    EmptyStateCard(title: "", subtitle: "")
 }

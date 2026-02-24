@@ -18,8 +18,11 @@ struct InboxView: View {
     var body: some View {
         List {
             if tasks.isEmpty {
-                Text("Inbox пуст")
-                    .foregroundStyle(.secondary)
+                
+                EmptyStateCard(
+                       title: "На сегодня задач нет 🎉",
+                       subtitle: "Добавь задачу — она появится здесь."
+                   )
             } else {
                 ForEach(tasks) { task in
                     TaskRow(task: task)

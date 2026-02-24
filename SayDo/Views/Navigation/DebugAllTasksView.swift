@@ -21,6 +21,7 @@ struct DebugAllTasksView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .cardListStyle()
         .navigationTitle("DEBUG: All Tasks (\(tasks.count))")
     }
 }

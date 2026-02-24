@@ -11,8 +11,8 @@ struct TaskListView: View {
     var body: some View {
         List {
             if tasks.isEmpty {
-                Text("Пока задач нет 🎉")
-                    .foregroundStyle(.secondary)
+                EmptyStateCard(title: "Пока задач нет 🎉", subtitle: "" )
+                   
             } else {
                 ForEach(tasks) { task in
                     HStack {
