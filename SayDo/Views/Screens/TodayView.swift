@@ -1,7 +1,7 @@
 
 import SwiftUI
 import SwiftData
-import Foundation
+
 
 struct TodayView: View {
     @Environment(\.modelContext) private var context
@@ -34,16 +34,10 @@ struct TodayView: View {
                     TaskRow(task: task)
                         .cardRowStyle()
                         .swipeActions(edge: .trailing) {
-                            Button("Inbox") {
-                                task.dueDate = nil
-                                save()
-                            }
-                            .tint(.orange)
-                            
-                            Button("Удалить", role: .destructive) {
-                                context.delete(task)
-                                save()
-                            }
+                            Button("Inbox") { moveToInbox(task) }
+                                .tint(.orange)
+
+                            Button("Удалить", role: .destructive) { deleteTask(task) }
                         }
                 }
             }
@@ -55,6 +49,32 @@ struct TodayView: View {
     private func save() {
         do { try context.save() }
         catch { print("Save error:", error) }
+    }
+    private func removeCalendarEventIfNeeded(for task: TaskModel) {
+        guard let eventID = task.calendarEventID else { return }
+        try? CalendarService.shared.deleteEvent(eventID: eventID)
+        task.calendarEventID = nil
+    }
+
+    private func moveToInbox(_ task: TaskModel) {
+        // 1) убрать событие из календаря (если было)
+        removeCalendarEventIfNeeded(for: task)
+
+        // 2) превратить в Inbox-задачу
+        task.dueDate = nil
+        task.reminderEnabled = false
+        task.notificationID = nil  // если ты уведомления отдельно чистишь — ок, но это логично
+
+        save()
+    }
+
+    private func deleteTask(_ task: TaskModel) {
+        // 1) убрать событие из календаря
+        removeCalendarEventIfNeeded(for: task)
+
+        // 2) удалить из SwiftData
+        context.delete(task)
+        save()
     }
 }
 

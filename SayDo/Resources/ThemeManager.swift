@@ -9,7 +9,6 @@ import Foundation
 import SwiftUI
 import Combine
 
-import SwiftUI
 
 final class ThemeManager: ObservableObject {
     @AppStorage("appTheme") private var storedTheme: String = AppTheme.dark.rawValue

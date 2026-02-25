@@ -80,16 +80,10 @@ struct UpcomingView: View {
                                 .cardRowStyle()
                                 .onTapGesture { selectedTask = task }
                                 .swipeActions(edge: .trailing) {
-                                    Button("Inbox") {
-                                        task.dueDate = nil
-                                        save()
-                                    }
-                                    .tint(.orange)
+                                    Button("Inbox") { moveToInbox(task) }
+                                        .tint(.orange)
 
-                                    Button("Удалить", role: .destructive) {
-                                        context.delete(task)
-                                        save()
-                                    }
+                                    Button("Удалить", role: .destructive) { deleteTask(task) }
                                 }
                         }
                     }
@@ -170,6 +164,7 @@ struct UpcomingView: View {
         .glassCard()
     }
 
+   
     @ViewBuilder
     private var dayDetails: some View {
         if let selectedDay {
@@ -189,11 +184,10 @@ struct UpcomingView: View {
                                 .cardRowStyle()
                                 .onTapGesture { selectedTask = task }
                                 .swipeActions(edge: .trailing) {
-                                    Button("Inbox") { task.dueDate = nil; save() }
+                                    Button("Inbox") { moveToInbox(task) }
                                         .tint(.orange)
-                                    Button("Удалить", role: .destructive) {
-                                        context.delete(task); save()
-                                    }
+
+                                    Button("Удалить", role: .destructive) { deleteTask(task) }
                                 }
                         }
                     }
@@ -275,6 +269,33 @@ struct UpcomingView: View {
     }
 
     private func save() { try? context.save() }
+    
+    private func removeCalendarEventIfNeeded(for task: TaskModel) {
+        guard let eventID = task.calendarEventID else { return }
+        try? CalendarService.shared.deleteEvent(eventID: eventID)
+        task.calendarEventID = nil
+    }
+
+    private func moveToInbox(_ task: TaskModel) {
+        // 1) убрать событие из календаря (если было)
+        removeCalendarEventIfNeeded(for: task)
+
+        // 2) превратить в Inbox-задачу
+        task.dueDate = nil
+        task.reminderEnabled = false
+        task.notificationID = nil  // если ты уведомления отдельно чистишь — ок, но это логично
+
+        save()
+    }
+
+    private func deleteTask(_ task: TaskModel) {
+        // 1) убрать событие из календаря
+        removeCalendarEventIfNeeded(for: task)
+
+        // 2) удалить из SwiftData
+        context.delete(task)
+        save()
+    }
 
     private enum Mode { case list, calendar }
 

@@ -11,7 +11,7 @@ final class TaskModel {
     var reminderEnabled: Bool = false
     var reminderMinutesBefore: Int = 10
     var notificationID: String? = nil
-
+    var calendarEventID: String? = nil
     init(
         id: UUID = UUID(),
         title: String,

@@ -27,5 +27,6 @@ struct DebugAllTasksView: View {
 }
 
 #Preview {
-    DebugAllTasksView()
+    NavigationStack { DebugAllTasksView() }
+        .modelContainer(for: TaskModel.self, inMemory: true)
 }

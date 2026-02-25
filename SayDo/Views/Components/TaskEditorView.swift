@@ -8,7 +8,7 @@
 
 import SwiftUI
 import SwiftData
-import UserNotifications
+
 
 struct TaskEditorView: View {
     @Environment(\.modelContext) private var context
@@ -22,6 +22,9 @@ struct TaskEditorView: View {
     
     @State private var reminderEnabled: Bool = false
     @State private var reminderMinutesBefore: Int = 10
+    
+    @State private var showCalendarDeniedAlert: Bool = false
+    @State private var calendarErrorMessage: String? = nil
 
 
     var body: some View {
@@ -33,7 +36,11 @@ struct TaskEditorView: View {
 
                 Section("Дата") {
                     Toggle("Есть дата", isOn: $hasDueDate)
-
+                        .onChange(of: hasDueDate) { _, newValue in
+                            if !newValue {
+                                reminderEnabled = false
+                            }
+                        }
                     if hasDueDate {
                         DatePicker("Когда", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                     } else {
@@ -44,8 +51,14 @@ struct TaskEditorView: View {
 
                 Section {
                     Button("Удалить", role: .destructive) {
+                        if let eventID = task.calendarEventID {
+                            try? CalendarService.shared.deleteEvent(eventID: eventID)
+                            task.calendarEventID = nil
+                        }
                         context.delete(task)
                         try? context.save()
+                        
+                        Task { await NotificationService.shared.cancel(id: task.notificationID ?? "") } // опционально
                         dismiss()
                     }
                 }
@@ -85,16 +98,30 @@ struct TaskEditorView: View {
                             task.notificationID = UUID().uuidString
                         }
 
-                        try? context.save()
-
                         Task {
+                            await syncCalendar(for: task)
+                            try? context.save()
                             await syncNotification(for: task)
                             dismiss()
                         }
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                   
                 }
 
+            }
+            .alert("Нет доступа к календарю", isPresented: $showCalendarDeniedAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Разреши доступ к календарю в настройках, чтобы SayDo мог обновлять события.")
+            }
+            .alert("Ошибка календаря", isPresented: Binding(
+                get: { calendarErrorMessage != nil },
+                set: { if !$0 { calendarErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(calendarErrorMessage ?? "")
             }
             .onAppear {
                 reminderEnabled = task.reminderEnabled
@@ -138,6 +165,39 @@ struct TaskEditorView: View {
         }
 
         await NotificationService.shared.schedule(id: id, title: task.title, fireDate: fireDate)
+    }
+    private func syncCalendar(for task: TaskModel) async {
+
+        // Если даты нет → удаляем событие
+        guard let due = task.dueDate else {
+            if let eventID = task.calendarEventID {
+                try? CalendarService.shared.deleteEvent(eventID: eventID)
+                task.calendarEventID = nil
+            }
+            return
+        }
+
+        // Просим доступ
+        let auth = await CalendarService.shared.requestAccessIfNeeded()
+        guard auth == .authorized else {
+            showCalendarDeniedAlert = true
+            return
+        }
+
+        do {
+            let newEventID = try CalendarService.shared.upsertEvent(
+                existingEventID: task.calendarEventID,
+                title: task.title,
+                dueDate: due,
+                reminderEnabled: task.reminderEnabled,
+                reminderMinutesBefore: task.reminderMinutesBefore
+            )
+
+            task.calendarEventID = newEventID
+
+        } catch {
+            calendarErrorMessage = error.localizedDescription
+        }
     }
 
 }
