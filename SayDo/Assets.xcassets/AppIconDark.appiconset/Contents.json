@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "SayDoLight.png",
+      "filename" : "SayDoDark 11.14.15.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,6 @@
           "value" : "dark"
         }
       ],
-      "filename" : "SayDoDark.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +24,6 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "SayDoTinted.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

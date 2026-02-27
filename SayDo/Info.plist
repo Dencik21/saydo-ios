@@ -2,6 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>Alternate Icons</key>
+		<dict>
+			<key>AppIconDark </key>
+			<dict>
+				<key>Icon name (iOS 11 and Later)</key>
+				<string>AppIconDark</string>
+			</dict>
+		</dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string></string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string></string>
+			<key>UIPrerenderedIcon</key>
+			<false/>
+		</dict>
+	</dict>
 	<key>Privacy - Microphone Usage Description
 Privacy - Microphone Usage Description
 Privacy - Microphone Usage Description
