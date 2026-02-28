@@ -36,8 +36,12 @@ struct RootView: View {
             navRoot(AppBackground { CaptureView() })
                 .tabItem { Label("Capture", systemImage: "mic") }
 
+            #if DEBUG
+            #if targetEnvironment(simulator)
             navRoot(AppBackground { DebugAllTasksView() })
                 .tabItem { Label("Debug", systemImage: "ladybug") }
+            #endif
+            #endif
         }
     }
     // MARK: - Navigation Wrapper (чтобы не копировать toolbar везде)

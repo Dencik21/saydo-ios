@@ -11,10 +11,12 @@ struct InboxView: View {
             filter: #Predicate<TaskModel> { task in
                 task.isDone == false && task.dueDate == nil
             },
-            sort: [SortDescriptor(\TaskModel.createdAt, order: .reverse)]
+            sort: [
+                SortDescriptor(\TaskModel.priorityRaw, order: .reverse),
+                SortDescriptor(\TaskModel.createdAt, order: .reverse)
+            ]
         )
     }
-    
     var body: some View {
         List {
             if tasks.isEmpty {

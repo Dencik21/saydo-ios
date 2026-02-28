@@ -23,6 +23,9 @@ final class TaskModel {
     var address: String? = nil
     var locationLat: Double? = nil
     var locationLon: Double? = nil
+    
+    // Priority: 0 = normal, 1 = important, 2 = urgent
+    var priorityRaw: Int = 0
 
     init(
         id: UUID = UUID(),

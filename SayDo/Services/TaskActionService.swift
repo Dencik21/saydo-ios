@@ -73,7 +73,18 @@ final class TaskActionService {
 
         if changed { save(context) }
     }
-
+    
+    // MARK: - Priority
+    
+    func setPriority(_ raw: Int, for task: TaskModel, in context: ModelContext) {
+        task.priorityRaw = raw
+        do { try context.save() } catch { print("Save error:", error) }
+    }
+    
+    func markImportant(_ task: TaskModel, in context: ModelContext) { setPriority(1, for: task, in: context) }
+    func markUrgent(_ task: TaskModel, in context: ModelContext) { setPriority(2, for: task, in: context) }
+    func clearPriority(_ task: TaskModel, in context: ModelContext) { setPriority(0, for: task, in: context) }
+    
     // MARK: - Helpers
 
     private func save(_ context: ModelContext) {

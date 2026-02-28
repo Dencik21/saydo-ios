@@ -148,6 +148,8 @@ final class CaptureViewModel: ObservableObject {
             m.address = d.address
             m.locationLat = d.coordinate?.lat
             m.locationLon = d.coordinate?.lon
+            // prioritet
+            m.priorityRaw = d.priorityRaw
 
             return m
         }

@@ -26,7 +26,11 @@ struct UpcomingView: View {
             filter: #Predicate<TaskModel> { task in
                 task.isDone == false && task.dueDate != nil
             },
-            sort: [SortDescriptor(\TaskModel.dueDate, order: .forward)]
+            sort: [
+                SortDescriptor(\TaskModel.dueDate, order: .forward),
+                SortDescriptor(\TaskModel.priorityRaw, order: .reverse),
+                SortDescriptor(\TaskModel.createdAt, order: .reverse)
+            ]
         )
     }
 
@@ -115,6 +119,32 @@ private extension UpcomingView {
                                     actions.delete(task, in: context)
                                 }
                             }
+                            
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+
+                                Button {
+                                    actions.markImportant(task, in: context)
+                                } label: {
+                                    Label("Важно", systemImage: "star.fill")
+                                }
+                                .tint(.yellow)
+
+                                Button {
+                                    actions.markUrgent(task, in: context)
+                                } label: {
+                                    Label("Срочно", systemImage: "exclamationmark.triangle.fill")
+                                }
+                                .tint(.orange)
+
+                                if task.priorityRaw != 0 {
+                                    Button {
+                                        actions.clearPriority(task, in: context)
+                                    } label: {
+                                        Label("Сбросить", systemImage: "xmark.circle")
+                                    }
+                                    .tint(.gray)
+                                }
+                            }
                         }
                     }
                 }
@@ -125,8 +155,21 @@ private extension UpcomingView {
 
     var grouped: [Date: [TaskModel]] {
         let cal = Calendar.current
-        return Dictionary(grouping: tasks) { task in
+
+        let dict = Dictionary(grouping: tasks) { task in
             cal.startOfDay(for: task.dueDate!) // dueDate != nil по фильтру
+        }
+
+        return dict.mapValues { items in
+            items.sorted {
+                if $0.priorityRaw != $1.priorityRaw {
+                    return $0.priorityRaw > $1.priorityRaw
+                }
+                let d0 = $0.dueDate ?? .distantFuture
+                let d1 = $1.dueDate ?? .distantFuture
+                if d0 != d1 { return d0 < d1 }
+                return $0.createdAt > $1.createdAt
+            }
         }
     }
 
@@ -249,14 +292,6 @@ private extension UpcomingView {
                                 }
                             )
                             .cardRowStyle()
-                            .swipeActions(edge: .trailing) {
-                                Button("Inbox") { actions.moveToInbox(task, in: context) }
-                                    .tint(.orange)
-
-                                Button("Удалить", role: .destructive) {
-                                    actions.delete(task, in: context)
-                                }
-                            }
                         }
                     }
                 }

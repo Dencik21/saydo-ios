@@ -1,27 +1,11 @@
-//
-//  TaskDraft.swift
-//  SayDo
-//
-//  Created by Denys Ilchenko on 18.02.26.
-//
-
-//
-//  TaskDraft.swift
-//  SayDo
-//
-//  Created by Denys Ilchenko on 18.02.26.
-//
-
 import Foundation
 
 struct TaskDraft: Identifiable, Hashable {
 
     // MARK: - Identity
-
     var id: UUID = UUID()
 
     // MARK: - Content
-
     var title: String
     var dueDate: Date?
 
@@ -32,9 +16,11 @@ struct TaskDraft: Identifiable, Hashable {
     var coordinate: Coordinate?
 
     // MARK: - Reminder
-
     var reminderEnabled: Bool = false
     var reminderMinutesBefore: Int = 10
+
+    // MARK: - Priority (0 normal, 1 important, 2 urgent)
+    var priorityRaw: Int = 0
 
     // MARK: - Custom Equatable/Hashable (ignore id)
 
@@ -44,7 +30,8 @@ struct TaskDraft: Identifiable, Hashable {
         lhs.address == rhs.address &&
         lhs.coordinate == rhs.coordinate &&
         lhs.reminderEnabled == rhs.reminderEnabled &&
-        lhs.reminderMinutesBefore == rhs.reminderMinutesBefore
+        lhs.reminderMinutesBefore == rhs.reminderMinutesBefore &&
+        lhs.priorityRaw == rhs.priorityRaw
     }
 
     func hash(into hasher: inout Hasher) {
@@ -54,5 +41,6 @@ struct TaskDraft: Identifiable, Hashable {
         hasher.combine(coordinate)
         hasher.combine(reminderEnabled)
         hasher.combine(reminderMinutesBefore)
+        hasher.combine(priorityRaw)
     }
 }

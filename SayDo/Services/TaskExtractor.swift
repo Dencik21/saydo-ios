@@ -12,12 +12,12 @@ final class TaskExtractor {
         var prepared = beautifier.beautify(text)
         guard !prepared.isEmpty else { return [] }
 
-        prepared = prepared.replacingOccurrences(
+       prepared = prepared.replacingOccurrences(
             of: Patterns.splitBeforeDateMarker,
             with: ". $1",
             options: .regularExpression
         )
-
+     
         let parts = splitSentencesSafe(prepared)
             .map(clean)
             .filter(isGoodTask)
@@ -30,8 +30,17 @@ final class TaskExtractor {
 
             let (date, cleanedTitle) = dateParser.parse(from: part)
 
+            // ✅ priority parsing
+            let pr = PriorityParser.extract(from: part)               // ✅ берём из исходника
+            let priorityRaw = pr.priority.rawValue
+
+            // ✅ чистим title уже из cleanedTitle, но если там “важно” уже удалили — ок, приоритет всё равно сохранится
+            let cleanedTitleAfterPriority = PriorityParser
+                .extract(from: cleanedTitle)
+                .cleanedText
+
             // ✅ address parsing
-            let addr = addressParser.parse(from: cleanedTitle)
+            let addr = addressParser.parse(from: cleanedTitleAfterPriority)
             let cleanedTitle2 = addr.cleanedTitle
             let extractedAddress = addr.address
 
@@ -43,7 +52,7 @@ final class TaskExtractor {
 
             let title = capitalizeFirst(cleanedTitle2)
             guard isGoodTask(title) else { continue }
-
+            
             result.append(
                 TaskDraft(
                     title: title,
@@ -51,7 +60,8 @@ final class TaskExtractor {
                     address: extractedAddress,
                     coordinate: nil,
                     reminderEnabled: false,
-                    reminderMinutesBefore: 10
+                    reminderMinutesBefore: 10,
+                    priorityRaw: priorityRaw
                 )
             )
         }

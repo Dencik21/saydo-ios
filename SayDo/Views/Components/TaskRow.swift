@@ -107,10 +107,23 @@ struct TaskRow: View {
     }
 
     private var titleLine: some View {
-        Text(task.title)
-            .font(.body)
-            .lineLimit(2)
-            .foregroundStyle(.primary)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+
+            if let icon = priorityIconName {
+                Image(systemName: icon)
+                    .font(.caption)
+                    .foregroundStyle(priorityIconStyle)
+                    .padding(.top, 1)
+                    .accessibilityLabel(task.priorityRaw == 2 ? "Срочно" : "Важно")
+            }
+
+            Text(task.title)
+                .font(.body)
+                .lineLimit(2)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+        }
     }
 
     private var metaLine: some View {
@@ -283,6 +296,21 @@ struct TaskRow: View {
 
     private func russianDate(_ date: Date) -> String {
         Self.ruFormatter.string(from: date)
+    }
+    
+    // MARK: - Derived
+    private var priorityIconName: String? {
+        switch task.priorityRaw {
+        case 2: return "exclamationmark.triangle.fill" // urgent
+        case 1: return "star.fill"                      // important
+        default: return nil
+        }
+    }
+
+    private var priorityIconStyle: some ShapeStyle {
+        if task.priorityRaw == 2 { return AnyShapeStyle(.orange) }
+        if task.priorityRaw == 1 { return AnyShapeStyle(.yellow) }
+        return AnyShapeStyle(.secondary)
     }
 }
 // MARK: - Preview

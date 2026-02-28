@@ -14,7 +14,11 @@ struct TodayView: View {
             filter: #Predicate<TaskModel> { task in
                 task.isDone == false && task.dueDate != nil
             },
-            sort: [SortDescriptor(\TaskModel.dueDate, order: .forward)]
+            sort: [
+                SortDescriptor(\TaskModel.priorityRaw, order: .reverse),
+                SortDescriptor(\TaskModel.dueDate, order: .forward),
+                SortDescriptor(\TaskModel.createdAt, order: .reverse)
+            ]
         )
     }
 
@@ -50,6 +54,31 @@ struct TodayView: View {
 
                         Button("Удалить", role: .destructive) {
                             actions.delete(task, in: context)
+                        }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+
+                        Button {
+                            actions.setPriority(1, for: task, in: context)
+                        } label: {
+                            Label("Важно", systemImage: "star.fill")
+                        }
+                        .tint(.yellow)
+
+                        Button {
+                            actions.setPriority(2, for: task, in: context)
+                        } label: {
+                            Label("Срочно", systemImage: "exclamationmark.triangle.fill")
+                        }
+                        .tint(.orange)
+
+                        if task.priorityRaw != 0 {
+                            Button {
+                                actions.setPriority(0, for: task, in: context)
+                            } label: {
+                                Label("Сброс", systemImage: "xmark.circle")
+                            }
+                            .tint(.gray)
                         }
                     }
                 }
