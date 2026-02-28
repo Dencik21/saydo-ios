@@ -2,15 +2,14 @@
 //  ConfirmTasksView.swift
 //  SayDo
 //
-//  Clean version: passes addToCalendar flag outward
+//  UI-only version (logic in ViewModel)
 //
 
 import SwiftUI
-import MapKit
 
 struct ConfirmTasksView: View {
 
-    // MARK: - Input
+    // MARK: - Input (same as before)
 
     let drafts: [TaskDraft]
     let onCancel: () -> Void
@@ -18,56 +17,75 @@ struct ConfirmTasksView: View {
     let onUpdate: (TaskDraft) -> Void
     let onConfirm: (_ addToCalendar: Bool) -> Void
 
-    // MARK: - Local state
+    // MARK: - VM
 
-    @State private var localDrafts: [TaskDraft] = []
-    @State private var bulkReminderEnabled: Bool = false
-    @State private var bulkMinutes: Int = 10
-    @State private var addToCalendar: Bool = false
+    @StateObject private var vm: ConfirmTasksViewModel
 
-    private let minuteOptions = [5, 10, 15, 30, 60]
+    init(
+        drafts: [TaskDraft],
+        onCancel: @escaping () -> Void,
+        onDelete: @escaping (TaskDraft) -> Void,
+        onUpdate: @escaping (TaskDraft) -> Void,
+        onConfirm: @escaping (_ addToCalendar: Bool) -> Void
+    ) {
+        self.drafts = drafts
+        self.onCancel = onCancel
+        self.onDelete = onDelete
+        self.onUpdate = onUpdate
+        self.onConfirm = onConfirm
 
-    // MARK: - Body
+        _vm = StateObject(wrappedValue: ConfirmTasksViewModel(
+            drafts: drafts,
+            onCancel: onCancel,
+            onDelete: onDelete,
+            onUpdate: onUpdate,
+            onConfirm: onConfirm
+        ))
+    }
 
     var body: some View {
         NavigationStack {
             List {
 
                 Section {
-                    Text("Найдено задач: \(localDrafts.count)")
+                    Text("Найдено задач: \(vm.drafts.count)")
                 }
 
                 Section {
-                    Toggle("Добавить в календарь", isOn: $addToCalendar)
+                    Toggle("Добавить в календарь", isOn: $vm.addToCalendar)
                 } footer: {
                     Text("В календарь добавляются только задачи с датой.")
                 }
 
                 Section("Напоминания") {
-                    Toggle("Напоминать всем", isOn: $bulkReminderEnabled)
+                    Toggle("Напоминать всем", isOn: $vm.bulkReminderEnabled)
 
-                    Picker("За сколько минут", selection: $bulkMinutes) {
-                        ForEach(minuteOptions, id: \.self) {
-                            Text("\($0) мин").tag($0)
+                    Picker("За сколько минут", selection: $vm.bulkMinutes) {
+                        ForEach(vm.minuteOptions, id: \.self) { v in
+                            Text("\(v) мин").tag(v)
                         }
                     }
-                    .disabled(!bulkReminderEnabled)
+                    .disabled(!vm.bulkReminderEnabled)
 
                     Button("Применить ко всем задачам") {
-                        applyBulkReminder()
+                        vm.applyBulkReminder()
                     }
-                    .disabled(localDrafts.isEmpty)
+                    .disabled(vm.drafts.isEmpty)
                 }
 
-                ForEach(localDrafts) { draft in
+                ForEach(vm.drafts) { draft in
                     NavigationLink {
-                        EditDraftView(draft: draft, onSave: updateDraft)
+                        EditDraftView(
+                            draft: draft,
+                            minuteOptions: vm.minuteOptions,
+                            onSave: { vm.updateDraft($0) }
+                        )
                     } label: {
                         DraftRow(draft: draft)
                     }
                     .swipeActions {
                         Button(role: .destructive) {
-                            deleteDraft(draft)
+                            vm.deleteDraft(draft)
                         } label: {
                             Label("Удалить", systemImage: "trash")
                         }
@@ -78,41 +96,17 @@ struct ConfirmTasksView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Отмена") { onCancel() }
+                    Button("Отмена") { vm.cancel() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Добавить") {
-                        onConfirm(addToCalendar)
-                    }
-                    .fontWeight(.semibold)
+                    Button("Добавить") { vm.confirm() }
+                        .fontWeight(.semibold)
+                        .disabled(vm.drafts.isEmpty)
                 }
             }
-            .onAppear {
-                localDrafts = drafts
-            }
-        }
-    }
-
-    // MARK: - Update / Delete
-
-    private func updateDraft(_ draft: TaskDraft) {
-        if let index = localDrafts.firstIndex(where: { $0.id == draft.id }) {
-            localDrafts[index] = draft
-        }
-        onUpdate(draft)
-    }
-
-    private func deleteDraft(_ draft: TaskDraft) {
-        localDrafts.removeAll { $0.id == draft.id }
-        onDelete(draft)
-    }
-
-    private func applyBulkReminder() {
-        for i in localDrafts.indices {
-            if localDrafts[i].dueDate != nil {
-                localDrafts[i].reminderEnabled = bulkReminderEnabled
-                localDrafts[i].reminderMinutesBefore = bulkMinutes
-                onUpdate(localDrafts[i])
+            // если родитель пришлёт новый массив drafts — обновим VM
+            .onChange(of: drafts) { _, newValue in
+                vm.setDrafts(newValue)
             }
         }
     }
@@ -121,7 +115,6 @@ struct ConfirmTasksView: View {
 // MARK: - Draft Row
 
 private struct DraftRow: View {
-
     let draft: TaskDraft
 
     var body: some View {
@@ -168,12 +161,14 @@ private struct DraftRow: View {
     }
 }
 
-// MARK: - Edit View
+// MARK: - Edit View (UI-only; save goes to VM)
 
 private struct EditDraftView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State var draft: TaskDraft
+
+    let minuteOptions: [Int]
     let onSave: (TaskDraft) -> Void
 
     var body: some View {
@@ -210,6 +205,13 @@ private struct EditDraftView: View {
             Section("Напоминание") {
                 Toggle("Напомнить", isOn: $draft.reminderEnabled)
                     .disabled(draft.dueDate == nil)
+
+                Picker("За сколько минут", selection: $draft.reminderMinutesBefore) {
+                    ForEach(minuteOptions, id: \.self) { v in
+                        Text("\(v) мин").tag(v)
+                    }
+                }
+                .disabled(draft.dueDate == nil || draft.reminderEnabled == false)
             }
         }
         .navigationTitle("Редактировать")

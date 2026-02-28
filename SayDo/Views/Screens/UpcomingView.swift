@@ -5,10 +5,8 @@
 //  Created by Denys Ilchenko on 28.02.26.
 //
 
-
 import SwiftUI
 import SwiftData
-import MapKit
 import CoreLocation
 
 struct UpcomingView: View {
@@ -20,6 +18,8 @@ struct UpcomingView: View {
     @State private var mode: Mode = .list
     @State private var monthAnchor: Date = Date()
     @State private var selectedDay: Date? = nil
+
+    private let actions = TaskActionService.shared
 
     init() {
         _tasks = Query(
@@ -49,7 +49,7 @@ struct UpcomingView: View {
 
         // ✅ reconcile: если пользователь удалил событие в Apple Calendar — удаляем задачу в приложении
         .task {
-            await reconcileCalendarDeletions()
+            await actions.reconcileCalendarDeletions(tasks: tasks, in: context)
         }
     }
 }
@@ -98,19 +98,22 @@ private extension UpcomingView {
                 ForEach(groupedKeys, id: \.self) { day in
                     Section(sectionTitle(for: day)) {
                         ForEach(grouped[day] ?? []) { task in
-
                             TaskRow(
                                 task: task,
-                                onToggleDone: { toggleDone($0) },
-                                onOpen: { selectedTask = $0 }
+                                onToggleDone: { actions.toggleDone($0, in: context) },
+                                onOpen: { selectedTask = $0 },
+                                onCacheCoordinate: { t, coord in
+                                    actions.cacheCoordinate(coord, for: t, in: context)
+                                }
                             )
                             .cardRowStyle()
-
                             .swipeActions(edge: .trailing) {
-                                Button("Inbox") { moveToInbox(task) }
+                                Button("Inbox") { actions.moveToInbox(task, in: context) }
                                     .tint(.orange)
 
-                                Button("Удалить", role: .destructive) { deleteTask(task) }
+                                Button("Удалить", role: .destructive) {
+                                    actions.delete(task, in: context)
+                                }
                             }
                         }
                     }
@@ -239,15 +242,20 @@ private extension UpcomingView {
                         ForEach(items) { task in
                             TaskRow(
                                 task: task,
-                                onToggleDone: { toggleDone($0) },
-                                onOpen: { selectedTask = $0 }
+                                onToggleDone: { actions.toggleDone($0, in: context) },
+                                onOpen: { selectedTask = $0 },
+                                onCacheCoordinate: { t, coord in
+                                    actions.cacheCoordinate(coord, for: t, in: context)
+                                }
                             )
                             .cardRowStyle()
                             .swipeActions(edge: .trailing) {
-                                Button("Inbox") { moveToInbox(task) }
+                                Button("Inbox") { actions.moveToInbox(task, in: context) }
                                     .tint(.orange)
 
-                                Button("Удалить", role: .destructive) { deleteTask(task) }
+                                Button("Удалить", role: .destructive) {
+                                    actions.delete(task, in: context)
+                                }
                             }
                         }
                     }
@@ -360,82 +368,6 @@ private extension UpcomingView {
     }
 }
 
-// MARK: - Actions
-
-private extension UpcomingView {
-
-    func save() { try? context.save() }
-
-    func cancelNotificationIfNeeded(for task: TaskModel) {
-        guard let nid = task.notificationID else { return }
-        Task { await NotificationService.shared.cancel(id: nid) }
-    }
-
-    func removeCalendarEventIfNeeded(for task: TaskModel) {
-        guard let eventID = task.calendarEventID else { return }
-        try? CalendarService.shared.deleteEvent(eventID: eventID)
-        task.calendarEventID = nil
-    }
-
-    /// ✅ Done -> удалить event из календаря + выключить напоминание + отменить pending notification
-    func toggleDone(_ task: TaskModel) {
-        task.isDone.toggle()
-
-        if task.isDone == true {
-            removeCalendarEventIfNeeded(for: task)
-
-            cancelNotificationIfNeeded(for: task)
-            task.reminderEnabled = false
-            task.notificationID = nil
-        }
-
-        save()
-    }
-
-    func moveToInbox(_ task: TaskModel) {
-        removeCalendarEventIfNeeded(for: task)
-
-        cancelNotificationIfNeeded(for: task)
-        task.dueDate = nil
-        task.reminderEnabled = false
-        task.notificationID = nil
-
-        save()
-    }
-
-    func deleteTask(_ task: TaskModel) {
-        removeCalendarEventIfNeeded(for: task)
-
-        cancelNotificationIfNeeded(for: task)
-        context.delete(task)
-
-        save()
-    }
-
-    /// ✅ Если пользователь удалил событие из Apple Calendar — удаляем задачу в приложении
-    @MainActor
-    func reconcileCalendarDeletions() async {
-        let auth = await CalendarService.shared.requestAccessIfNeeded()
-        guard auth == .authorized else { return }
-
-        var changed = false
-
-        for t in tasks {
-            guard let eventID = t.calendarEventID else { continue }
-
-            if CalendarService.shared.eventExists(eventID: eventID) == false {
-                cancelNotificationIfNeeded(for: t)
-                context.delete(t)
-                changed = true
-            }
-        }
-
-        if changed {
-            try? context.save()
-        }
-    }
-}
-
 private enum Mode { case list, calendar }
 
 // MARK: - Glass Styles
@@ -460,7 +392,7 @@ private extension View {
     }
 }
 
-// MARK: - Preview (без координат: только address)
+// MARK: - Preview
 
 #Preview("Upcoming — sample tasks (address only)") {
     let container = try! ModelContainer(
@@ -473,11 +405,10 @@ private extension View {
     let now = Date()
 
     let t1 = TaskModel(title: "Встреча в кафе", dueDate: cal.date(byAdding: .day, value: 1, to: now)!)
-    t1.address = "Hauptstraße 10, Köln"        // ✅ только адрес
-    // t1.locationLat / locationLon НЕ задаём
+    t1.address = "Hauptstraße 10, Köln"
 
     let t2 = TaskModel(title: "Стоматолог", dueDate: cal.date(byAdding: .day, value: 3, to: now)!)
-    t2.address = "Berliner Allee 5, Düsseldorf" // ✅ только адрес
+    t2.address = "Berliner Allee 5, Düsseldorf"
     t2.reminderEnabled = true
 
     let t3 = TaskModel(title: "Купить молоко", dueDate: cal.date(byAdding: .day, value: 2, to: now)!)

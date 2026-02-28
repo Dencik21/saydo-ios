@@ -1,3 +1,5 @@
+
+
 //
 //  CaptureView.swift
 //  SayDo
@@ -31,9 +33,7 @@ struct CaptureView: View {
             .padding(.bottom, 18)
         }
         .task { await vm.requestPermission() }
-        .fullScreenCover(isPresented: reviewBinding) {
-            reviewScreen
-        }
+        .fullScreenCover(isPresented: reviewBinding) { reviewScreen }
         .overlay {
             if isProcessing {
                 ProgressOverlay(text: "Обрабатываю…", isDark: ui.isDark)
@@ -65,102 +65,20 @@ private extension CaptureView {
     }
 
     func confirmDrafts(addToCalendar: Bool) {
-
         let models = vm.confirmedTasks()
 
-        // 1) Insert into SwiftData first
-        for m in models {
-            // Notification ID
-            if m.reminderEnabled {
-                m.notificationID = m.notificationID ?? UUID().uuidString
-            } else {
-                m.notificationID = nil
-            }
-
-            context.insert(m)
-        }
-
-        do {
-            try context.save()
-        } catch {
-            print("❌ Save error:", error)
-        }
-
-        // 2) Calendar sync (optional)
-        if addToCalendar {
-            Task {
-                let auth = await CalendarService.shared.requestAccessIfNeeded()
-                guard auth == .authorized else { return }
-
-                for m in models {
-                    guard let due = m.dueDate else { continue }
-
-                    do {
-                        // ✅ IMPORTANT: upsert with taskID + existingEventID to prevent duplicates
-                        let eventID = try CalendarService.shared.upsertEvent(
-                            existingEventID: m.calendarEventID,
-                            taskID: m.id,
-                            title: m.title,
-                            dueDate: due,
-                            reminderEnabled: m.reminderEnabled,
-                            reminderMinutesBefore: m.reminderMinutesBefore
-                        )
-
-                        m.calendarEventID = eventID
-
-                    } catch {
-                        print("❌ Calendar error:", error)
-                    }
-                }
-
-                try? context.save()
-            }
-        }
-
-        // 3) Notifications
         Task {
-            for m in models {
-                await scheduleIfNeeded(task: m)
+            await TaskSyncService.shared.persistAndSync(
+                tasks: models,
+                in: context,
+                addToCalendar: addToCalendar
+            )
+
+            // UI reset только после всех операций
+            await MainActor.run {
+                vm.reset()
             }
         }
-
-        vm.reset()
-    }
-}
-
-//
-// MARK: - NOTIFICATIONS
-//
-
-private extension CaptureView {
-
-    func scheduleIfNeeded(task: TaskModel) async {
-
-        guard let id = task.notificationID else { return }
-
-        guard task.isDone == false,
-              task.reminderEnabled,
-              let due = task.dueDate
-        else {
-            await NotificationService.shared.cancel(id: id)
-            return
-        }
-
-        let ok = await NotificationService.shared.requestAuthIfNeeded()
-        guard ok else { return }
-
-        let fireDate = due.addingTimeInterval(TimeInterval(-task.reminderMinutesBefore * 60))
-
-        guard fireDate > Date() else {
-            await NotificationService.shared.cancel(id: id)
-            return
-        }
-
-        await NotificationService.shared.schedule(
-            id: id,
-            title: task.title,
-            fireDate: fireDate
-        )
     }
 }
 

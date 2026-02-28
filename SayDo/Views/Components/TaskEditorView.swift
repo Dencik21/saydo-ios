@@ -201,7 +201,7 @@ struct TaskEditorView: View {
     private func syncCalendar(for task: TaskModel) async {
 
         // Если даты нет → удаляем событие
-        guard let due = task.dueDate else {
+        guard task.dueDate != nil else {
             if let eventID = task.calendarEventID {
                 try? CalendarService.shared.deleteEvent(eventID: eventID)
                 task.calendarEventID = nil
@@ -218,16 +218,16 @@ struct TaskEditorView: View {
 
         do {
             // ✅ ВАЖНО: taskID нужен для стабильной привязки и предотвращения дублей
-            let newEventID = try CalendarService.shared.upsertEvent(
+            let id = try CalendarService.shared.upsertEvent(
                 existingEventID: task.calendarEventID,
                 taskID: task.id,
                 title: task.title,
-                dueDate: due,
+                dueDate: task.dueDate,
+                address: task.address, // ✅ сюда адрес
                 reminderEnabled: task.reminderEnabled,
                 reminderMinutesBefore: task.reminderMinutesBefore
             )
-
-            task.calendarEventID = newEventID
+            task.calendarEventID = id
         } catch {
             calendarErrorMessage = error.localizedDescription
         }

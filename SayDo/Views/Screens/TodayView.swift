@@ -1,13 +1,14 @@
-
 import SwiftUI
 import SwiftData
-
+import CoreLocation
 
 struct TodayView: View {
+
     @Environment(\.modelContext) private var context
-    
     @Query private var allTasks: [TaskModel]
-    
+
+    private let actions = TaskActionService.shared
+
     init() {
         _allTasks = Query(
             filter: #Predicate<TaskModel> { task in
@@ -16,71 +17,50 @@ struct TodayView: View {
             sort: [SortDescriptor(\TaskModel.dueDate, order: .forward)]
         )
     }
-    
-    var body: some View {
-        let todayTasks = allTasks.filter { task in
+
+    private var todayTasks: [TaskModel] {
+        let cal = Calendar.current
+        return allTasks.filter { task in
             guard let d = task.dueDate else { return false }
-            return Calendar.current.isDateInToday(d)
+            return cal.isDateInToday(d)
         }
-        
-        return List {
+    }
+
+    var body: some View {
+        List {
             if todayTasks.isEmpty {
                 EmptyStateCard(
-                       title: "На сегодня задач нет 🎉",
-                       subtitle: "Добавь задачу — она появится здесь."
-                   )
+                    title: "На сегодня задач нет 🎉",
+                    subtitle: "Добавь задачу — она появится здесь."
+                )
             } else {
                 ForEach(todayTasks) { task in
-                    TaskRow(task: task)
-                        .cardRowStyle()
-                        .swipeActions(edge: .trailing) {
-                            Button("Inbox") { moveToInbox(task) }
-                                .tint(.orange)
-
-                            Button("Удалить", role: .destructive) { deleteTask(task) }
+                    TaskRow(
+                        task: task,
+                        onToggleDone: { actions.toggleDone($0, in: context) },
+                        onOpen: { _ in },
+                        onCacheCoordinate: { t, coord in
+                            actions.cacheCoordinate(coord, for: t, in: context)
                         }
+                    )
+                    .cardRowStyle()
+                    .swipeActions(edge: .trailing) {
+                        Button("Inbox") { actions.moveToInbox(task, in: context) }
+                            .tint(.orange)
+
+                        Button("Удалить", role: .destructive) {
+                            actions.delete(task, in: context)
+                        }
+                    }
                 }
             }
         }
         .cardListStyle()
         .navigationTitle("Today")
     }
-    
-    private func save() {
-        do { try context.save() }
-        catch { print("Save error:", error) }
-    }
-    private func removeCalendarEventIfNeeded(for task: TaskModel) {
-        guard let eventID = task.calendarEventID else { return }
-        try? CalendarService.shared.deleteEvent(eventID: eventID)
-        task.calendarEventID = nil
-    }
-
-    private func moveToInbox(_ task: TaskModel) {
-        // 1) убрать событие из календаря (если было)
-        removeCalendarEventIfNeeded(for: task)
-
-        // 2) превратить в Inbox-задачу
-        task.dueDate = nil
-        task.reminderEnabled = false
-        task.notificationID = nil  // если ты уведомления отдельно чистишь — ок, но это логично
-
-        save()
-    }
-
-    private func deleteTask(_ task: TaskModel) {
-        // 1) убрать событие из календаря
-        removeCalendarEventIfNeeded(for: task)
-
-        // 2) удалить из SwiftData
-        context.delete(task)
-        save()
-    }
 }
 
 #Preview {
-    NavigationStack {
-        TodayView()
-    }
-    .modelContainer(for: TaskModel.self, inMemory: true)
+    NavigationStack { TodayView() }
+        .modelContainer(for: TaskModel.self, inMemory: true)
 }

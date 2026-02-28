@@ -66,6 +66,7 @@ final class CalendarService {
         taskID: UUID,
         title: String,
         dueDate: Date?,
+        address: String?,                 // ✅ NEW
         reminderEnabled: Bool,
         reminderMinutesBefore: Int
     ) throws -> String {
@@ -84,6 +85,7 @@ final class CalendarService {
                 taskID: taskID,
                 title: title,
                 due: due,
+                address: address,           // ✅ NEW
                 reminderEnabled: reminderEnabled,
                 reminderMinutesBefore: reminderMinutesBefore
             )
@@ -96,6 +98,7 @@ final class CalendarService {
                 taskID: taskID,
                 title: title,
                 due: due,
+                address: address,           // ✅ NEW
                 reminderEnabled: reminderEnabled,
                 reminderMinutesBefore: reminderMinutesBefore
             )
@@ -110,6 +113,7 @@ final class CalendarService {
             taskID: taskID,
             title: title,
             due: due,
+            address: address,               // ✅ NEW
             reminderEnabled: reminderEnabled,
             reminderMinutesBefore: reminderMinutesBefore
         )
@@ -120,6 +124,7 @@ final class CalendarService {
         taskID: UUID,
         title: String,
         due: Date,
+        address: String?,                  // ✅ NEW
         reminderEnabled: Bool,
         reminderMinutesBefore: Int
     ) throws -> String {
@@ -130,6 +135,10 @@ final class CalendarService {
         event.startDate = due
         event.endDate = Calendar.current.date(byAdding: .minute, value: 30, to: due) ?? due
         event.isAllDay = false
+
+        // ✅ МЕСТОПОЛОЖЕНИЕ (Apple Calendar: Location)
+        let trimmed = (address ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        event.location = trimmed.isEmpty ? nil : trimmed
 
         // ✅ стабильная привязка “это событие принадлежит этой задаче”
         event.url = URL(string: "saydo://task/\(taskID.uuidString)")
