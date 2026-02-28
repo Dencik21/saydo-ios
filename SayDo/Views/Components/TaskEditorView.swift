@@ -5,10 +5,8 @@
 //  Created by Denys Ilchenko on 19.02.26.
 //
 
-
 import SwiftUI
 import SwiftData
-
 
 struct TaskEditorView: View {
     @Environment(\.modelContext) private var context
@@ -19,13 +17,12 @@ struct TaskEditorView: View {
     @State private var title: String = ""
     @State private var hasDueDate: Bool = false
     @State private var dueDate: Date = Date()
-    
+
     @State private var reminderEnabled: Bool = false
     @State private var reminderMinutesBefore: Int = 10
-    
+
     @State private var showCalendarDeniedAlert: Bool = false
     @State private var calendarErrorMessage: String? = nil
-
 
     var body: some View {
         NavigationStack {
@@ -41,6 +38,7 @@ struct TaskEditorView: View {
                                 reminderEnabled = false
                             }
                         }
+
                     if hasDueDate {
                         DatePicker("Когда", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
                     } else {
@@ -49,20 +47,6 @@ struct TaskEditorView: View {
                     }
                 }
 
-                Section {
-                    Button("Удалить", role: .destructive) {
-                        if let eventID = task.calendarEventID {
-                            try? CalendarService.shared.deleteEvent(eventID: eventID)
-                            task.calendarEventID = nil
-                        }
-                        context.delete(task)
-                        try? context.save()
-                        
-                        Task { await NotificationService.shared.cancel(id: task.notificationID ?? "") } // опционально
-                        dismiss()
-                    }
-                }
-                
                 if hasDueDate {
                     Section("Напоминание") {
                         Toggle("Напоминать", isOn: $reminderEnabled)
@@ -79,6 +63,26 @@ struct TaskEditorView: View {
                     }
                 }
 
+                Section {
+                    Button("Удалить", role: .destructive) {
+                        // календарь
+                        if let eventID = task.calendarEventID {
+                            try? CalendarService.shared.deleteEvent(eventID: eventID)
+                            task.calendarEventID = nil
+                        }
+
+                        // уведомления
+                        if let nid = task.notificationID {
+                            Task { await NotificationService.shared.cancel(id: nid) }
+                        }
+
+                        // база
+                        context.delete(task)
+                        try? context.save()
+
+                        dismiss()
+                    }
+                }
             }
             .navigationTitle("Редактировать")
             .navigationBarTitleDisplayMode(.inline)
@@ -88,27 +92,23 @@ struct TaskEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Сохранить") {
-                        task.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        task.dueDate = hasDueDate ? dueDate : nil
-
-                        task.reminderEnabled = hasDueDate ? reminderEnabled : false
-                        task.reminderMinutesBefore = reminderMinutesBefore
-
-                        if task.notificationID == nil {
-                            task.notificationID = UUID().uuidString
-                        }
+                        applyFieldsToModel()
 
                         Task {
+                            // календарь
                             await syncCalendar(for: task)
+
+                            // база
                             try? context.save()
+
+                            // уведомления
                             await syncNotification(for: task)
+
                             dismiss()
                         }
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                   
                 }
-
             }
             .alert("Нет доступа к календарю", isPresented: $showCalendarDeniedAlert) {
                 Button("OK", role: .cancel) {}
@@ -124,23 +124,52 @@ struct TaskEditorView: View {
                 Text(calendarErrorMessage ?? "")
             }
             .onAppear {
-                reminderEnabled = task.reminderEnabled
-                reminderMinutesBefore = task.reminderMinutesBefore
-                title = task.title
-                if let d = task.dueDate {
-                    hasDueDate = true
-                    dueDate = d
-                } else {
-                    hasDueDate = false
-                    dueDate = Date()
-                }
-                if task.dueDate == nil {
-                    reminderEnabled = false
-                }
-
+                loadFromModel()
             }
         }
     }
+
+    // MARK: - Model mapping
+
+    private func loadFromModel() {
+        title = task.title
+
+        reminderEnabled = task.reminderEnabled
+        reminderMinutesBefore = task.reminderMinutesBefore
+
+        if let d = task.dueDate {
+            hasDueDate = true
+            dueDate = d
+        } else {
+            hasDueDate = false
+            dueDate = Date()
+            reminderEnabled = false
+        }
+    }
+
+    private func applyFieldsToModel() {
+        task.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.dueDate = hasDueDate ? dueDate : nil
+
+        task.reminderEnabled = hasDueDate ? reminderEnabled : false
+        task.reminderMinutesBefore = reminderMinutesBefore
+
+        // id для уведомлений: создаём, только если реально включено
+        if task.reminderEnabled {
+            if task.notificationID == nil {
+                task.notificationID = UUID().uuidString
+            }
+        } else {
+            // если выключили — отменим и занулим
+            if let nid = task.notificationID {
+                Task { await NotificationService.shared.cancel(id: nid) }
+            }
+            task.notificationID = nil
+        }
+    }
+
+    // MARK: - Notifications
+
     private func syncNotification(for task: TaskModel) async {
         guard let id = task.notificationID else { return }
 
@@ -166,6 +195,9 @@ struct TaskEditorView: View {
 
         await NotificationService.shared.schedule(id: id, title: task.title, fireDate: fireDate)
     }
+
+    // MARK: - Calendar
+
     private func syncCalendar(for task: TaskModel) async {
 
         // Если даты нет → удаляем событие
@@ -185,8 +217,10 @@ struct TaskEditorView: View {
         }
 
         do {
+            // ✅ ВАЖНО: taskID нужен для стабильной привязки и предотвращения дублей
             let newEventID = try CalendarService.shared.upsertEvent(
                 existingEventID: task.calendarEventID,
+                taskID: task.id,
                 title: task.title,
                 dueDate: due,
                 reminderEnabled: task.reminderEnabled,
@@ -194,30 +228,31 @@ struct TaskEditorView: View {
             )
 
             task.calendarEventID = newEventID
-
         } catch {
             calendarErrorMessage = error.localizedDescription
         }
     }
-
 }
+
+// MARK: - Preview
+
 #Preview {
     let container = try! ModelContainer(
         for: TaskModel.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
-    
+
     let context = container.mainContext
-    
+
     let task = TaskModel(
         title: "Позвонить врачу",
         dueDate: Calendar.current.date(byAdding: .hour, value: 2, to: Date())
     )
-    
+
     task.reminderEnabled = true
     task.reminderMinutesBefore = 10
     task.notificationID = UUID().uuidString
-    
+
     context.insert(task)
 
     return TaskEditorView(task: task)

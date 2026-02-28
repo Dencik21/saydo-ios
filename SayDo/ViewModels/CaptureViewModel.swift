@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CoreLocation
 
 @MainActor
 final class CaptureViewModel: ObservableObject {
@@ -14,28 +15,30 @@ final class CaptureViewModel: ObservableObject {
         case error(String)
     }
 
-    @Published private(set) var phase: Phase = .idle
+    // MARK: - Published
 
+    @Published private(set) var phase: Phase = .idle
     @Published private(set) var liveTranscript: String = ""
     @Published private(set) var finalTranscript: String = ""
-
     @Published private(set) var isRecording: Bool = false
     @Published var language: SpeechLanguage = .ru
 
     // MARK: - Dependencies
 
     private let speechService = SpeechService()
-    private var streamTask: Task<Void, Never>? = nil
-
     private let beautifier = TextBeautifier()
-    private let extractor = TaskExtractor() // extractor.extract(from:) -> [TaskModel]
+    private let extractor = TaskExtractor()
+    private let locationService = LocationService.shared
+
+    private var streamTask: Task<Void, Never>?
 
     // MARK: - Permissions
 
     func requestPermission() async {
         let ok = await speechService.requestSpeechAuthorization()
-        if !ok {
+        guard ok else {
             phase = .error("Нет доступа к распознаванию речи. Проверь разрешения в настройках.")
+            return
         }
     }
 
@@ -44,18 +47,14 @@ final class CaptureViewModel: ObservableObject {
     func start() {
         guard !isRecording else { return }
 
-        // чистим UI
-        liveTranscript = ""
-        finalTranscript = ""
+        resetTranscripts()
         phase = .listening
 
         do {
             speechService.setLocale(language.rawValue)
-
             let stream = try speechService.startTranscribing()
-            isRecording = true
 
-            // ✅ отменяем предыдущий таск, если вдруг остался
+            isRecording = true
             streamTask?.cancel()
 
             streamTask = Task { [weak self] in
@@ -69,19 +68,16 @@ final class CaptureViewModel: ObservableObject {
                         self.liveTranscript = text
                     }
                 } catch {
-                    // если мы остановили запись вручную — это может прилететь как cancel/error,
-                    // но мы всё равно попробуем обработать то, что успели получить
-                    self.finalTranscript = lastText.isEmpty ? self.liveTranscript : lastText
+                    // stop/cancel тоже может прийти сюда — всё равно обрабатываем то, что есть
+                    self.finalTranscript = self.pickFinalText(lastText: lastText)
                     self.isRecording = false
-                    await self.processToDraftsAndOpenReview()
+                    await self.processTranscriptToReview()
                     return
                 }
 
-                // Стрим завершился нормально
                 self.finalTranscript = lastText
                 self.isRecording = false
-
-                await self.processToDraftsAndOpenReview()
+                await self.processTranscriptToReview()
             }
 
         } catch {
@@ -92,18 +88,13 @@ final class CaptureViewModel: ObservableObject {
 
     func stop() {
         guard isRecording else { return }
-
-        // ✅ важно: НЕ cancel streamTask — пусть он сам завершится
         speechService.stop()
-
         isRecording = false
-        // финальный текст доберём из lastText в streamTask, но на всякий случай:
+
+        // На всякий случай: если финал пустой — оставим live
         if finalTranscript.isEmpty {
             finalTranscript = liveTranscript
         }
-
-        // ⚠️ НЕ запускаем processToDraftsAndOpenReview() отсюда,
-        // иначе получишь двойной вызов (и двойной review)
     }
 
     func reset() {
@@ -111,51 +102,9 @@ final class CaptureViewModel: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
 
-        liveTranscript = ""
-        finalTranscript = ""
+        resetTranscripts()
         isRecording = false
-
         phase = .idle
-    }
-
-    // MARK: - Processing
-
-    private func processToDraftsAndOpenReview() async {
-        phase = .processing
-
-        let raw = finalTranscript.isEmpty ? liveTranscript : finalTranscript
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmed.isEmpty else {
-            phase = .error("Пусто 😅 Скажи что-нибудь ещё раз.")
-            return
-        }
-
-        // ✅ 1) Сначала делим диктовку на части (через beautifier)
-        // splitTasks внутри вызывает beautify и потом режет по пунктуации
-        let parts = beautifier.splitTasks(trimmed)
-
-        // ✅ 2) Extract для каждой части отдельно — это ключ к нормальному разбиению
-        let models: [TaskModel] = parts.flatMap { part in
-            extractor.extract(from: part)
-        }
-
-        // ✅ 3) В drafts
-        let drafts = models
-            .map { TaskDraft(title: $0.title, dueDate: $0.dueDate) }
-            .map { d in
-                // чистим заголовок
-                var copy = d
-                copy.title = copy.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                return copy
-            }
-            .filter { !$0.title.isEmpty }
-
-        if drafts.isEmpty {
-            phase = .error("Не нашёл задач в сообщении 😅 Попробуй сказать чуть конкретнее.")
-        } else {
-            phase = .review(drafts)
-        }
     }
 
     // MARK: - Review actions
@@ -177,15 +126,103 @@ final class CaptureViewModel: ObservableObject {
         phase = .review(drafts)
     }
 
-    /// ✅ Возвращаем SwiftData-модели, готовые к insert
+    // MARK: - Confirm
+
     func confirmedTasks() -> [TaskModel] {
         guard case .review(let drafts) = phase else { return [] }
+
         return drafts.map { d in
-            let m = TaskModel(title: d.title, dueDate: d.dueDate, isDone: false, createdAt: .now)
+            let m = TaskModel(
+                title: d.title,
+                dueDate: d.dueDate,
+                isDone: false,
+                createdAt: .now
+            )
+
+            // reminder
             m.reminderEnabled = d.reminderEnabled
             m.reminderMinutesBefore = d.reminderMinutesBefore
-            m.notificationID = d.reminderEnabled ? (UUID().uuidString) : nil
+            m.notificationID = d.reminderEnabled ? UUID().uuidString : nil
+
+            // location
+            m.address = d.address
+            m.locationLat = d.coordinate?.lat
+            m.locationLon = d.coordinate?.lon
+
             return m
         }
+    }
+
+    // MARK: - Processing pipeline
+
+    private func processTranscriptToReview() async {
+        phase = .processing
+
+        let raw = finalTranscript.isEmpty ? liveTranscript : finalTranscript
+        let trimmed = raw.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            phase = .error("Пусто 😅 Скажи что-нибудь ещё раз.")
+            return
+        }
+
+        // 1) split to chunks
+        let parts = beautifier.splitTasks(trimmed)
+
+        // 2) extract drafts (includes address)
+        var drafts = parts.flatMap { extractor.extractDrafts(from: $0) }
+
+        // 3) normalize / filter
+        drafts = normalizeDrafts(drafts)
+
+        guard !drafts.isEmpty else {
+            phase = .error("Не нашёл задач в сообщении 😅 Попробуй сказать чуть конкретнее.")
+            return
+        }
+
+        // 4) geocode addresses -> coordinates
+        drafts = await hydrateLocations(drafts)
+
+        phase = .review(drafts)
+    }
+
+    private func normalizeDrafts(_ drafts: [TaskDraft]) -> [TaskDraft] {
+        drafts
+            .map { d in
+                var copy = d
+                copy.title = copy.title.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                return copy
+            }
+            .filter { !$0.title.isEmpty }
+    }
+
+    private func hydrateLocations(_ drafts: [TaskDraft]) async -> [TaskDraft] {
+        var updated = drafts
+
+        for i in updated.indices {
+            guard updated[i].coordinate == nil,
+                  let address = updated[i].address?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
+                  !address.isEmpty
+            else { continue }
+
+            if let coord: CLLocationCoordinate2D = await locationService.geocode(address) {
+                updated[i].coordinate = Coordinate(lat: coord.latitude, lon: coord.longitude)
+            }
+        }
+
+        return updated
+    }
+
+    // MARK: - Helpers
+
+    private func resetTranscripts() {
+        liveTranscript = ""
+        finalTranscript = ""
+    }
+
+    private func pickFinalText(lastText: String) -> String {
+        if !lastText.isEmpty { return lastText }
+        if !liveTranscript.isEmpty { return liveTranscript }
+        return ""
     }
 }

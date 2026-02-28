@@ -1,70 +1,44 @@
+//
+//  ConfirmTasksView.swift
+//  SayDo
+//
+//  Clean version: passes addToCalendar flag outward
+//
+
 import SwiftUI
+import MapKit
 
 struct ConfirmTasksView: View {
-    // вход
+
+    // MARK: - Input
+
     let drafts: [TaskDraft]
     let onCancel: () -> Void
     let onDelete: (TaskDraft) -> Void
     let onUpdate: (TaskDraft) -> Void
-    let onConfirm: () -> Void
+    let onConfirm: (_ addToCalendar: Bool) -> Void
 
-    // локальная копия, чтобы UI сразу обновлялся
+    // MARK: - Local state
+
     @State private var localDrafts: [TaskDraft] = []
-
     @State private var bulkReminderEnabled: Bool = false
     @State private var bulkMinutes: Int = 10
     @State private var addToCalendar: Bool = false
 
-    @State private var showCalendarDeniedAlert: Bool = false
-    @State private var calendarErrorMessage: String? = nil
-
     private let minuteOptions = [5, 10, 15, 30, 60]
-
-    // MARK: - Grouping
-
-    private var grouped: [(title: String, items: [TaskDraft])] {
-        let cal = Calendar.current
-        let now = Date()
-
-        func sectionTitle(for date: Date?) -> String {
-            guard let d = date else { return "Без даты" }
-            if cal.isDateInToday(d) { return "Сегодня" }
-            if cal.isDateInTomorrow(d) { return "Завтра" }
-            if let weekEnd = cal.date(byAdding: .day, value: 7, to: now),
-               d < weekEnd { return "На этой неделе" }
-            return "Позже"
-        }
-
-        let dict = Dictionary(grouping: localDrafts) { sectionTitle(for: $0.dueDate) }
-        let order = ["Сегодня", "Завтра", "На этой неделе", "Позже", "Без даты"]
-
-        return order.compactMap { key in
-            guard let items = dict[key] else { return nil }
-            let sorted = items.sorted {
-                switch ($0.dueDate, $1.dueDate) {
-                case let (a?, b?): return a < b
-                case (nil, _?): return false
-                case (_?, nil): return true
-                case (nil, nil): return $0.title < $1.title
-                }
-            }
-            return (key, sorted)
-        }
-    }
 
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
             List {
+
                 Section {
                     Text("Найдено задач: \(localDrafts.count)")
-                        .foregroundStyle(.primary)
                 }
 
                 Section {
                     Toggle("Добавить в календарь", isOn: $addToCalendar)
-                        .tint(.accentColor)
                 } footer: {
                     Text("В календарь добавляются только задачи с датой.")
                 }
@@ -73,8 +47,8 @@ struct ConfirmTasksView: View {
                     Toggle("Напоминать всем", isOn: $bulkReminderEnabled)
 
                     Picker("За сколько минут", selection: $bulkMinutes) {
-                        ForEach(minuteOptions, id: \.self) { m in
-                            Text("\(m) мин").tag(m)
+                        ForEach(minuteOptions, id: \.self) {
+                            Text("\($0) мин").tag($0)
                         }
                     }
                     .disabled(!bulkReminderEnabled)
@@ -85,29 +59,21 @@ struct ConfirmTasksView: View {
                     .disabled(localDrafts.isEmpty)
                 }
 
-                ForEach(grouped, id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.items) { draft in
-                            NavigationLink {
-                                EditDraftView(draft: draft, onSave: updateDraft)
-                            } label: {
-                                DraftRow(draft: draft)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    deleteDraft(draft)
-                                } label: {
-                                    Label("Удалить", systemImage: "trash")
-                                }
-                            }
+                ForEach(localDrafts) { draft in
+                    NavigationLink {
+                        EditDraftView(draft: draft, onSave: updateDraft)
+                    } label: {
+                        DraftRow(draft: draft)
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            deleteDraft(draft)
+                        } label: {
+                            Label("Удалить", systemImage: "trash")
                         }
                     }
                 }
             }
-            .cardListStyle()
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-
             .navigationTitle("Подтверждение")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -115,35 +81,23 @@ struct ConfirmTasksView: View {
                     Button("Отмена") { onCancel() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Добавить") { confirmTapped() }
-                        .fontWeight(.semibold)
+                    Button("Добавить") {
+                        onConfirm(addToCalendar)
+                    }
+                    .fontWeight(.semibold)
                 }
             }
-            .alert("Нет доступа к календарю", isPresented: $showCalendarDeniedAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Разреши доступ к календарю в настройках, чтобы SayDo мог добавлять события.")
-            }
-            .alert("Ошибка календаря", isPresented: Binding(
-                get: { calendarErrorMessage != nil },
-                set: { if !$0 { calendarErrorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(calendarErrorMessage ?? "")
-            }
             .onAppear {
-                // важно: берём входные drafts в локальное состояние, чтобы UI обновлялся
                 localDrafts = drafts
             }
         }
     }
 
-    // MARK: - Actions (локальные)
+    // MARK: - Update / Delete
 
     private func updateDraft(_ draft: TaskDraft) {
-        if let idx = localDrafts.firstIndex(where: { $0.id == draft.id }) {
-            localDrafts[idx] = draft
+        if let index = localDrafts.firstIndex(where: { $0.id == draft.id }) {
+            localDrafts[index] = draft
         }
         onUpdate(draft)
     }
@@ -154,56 +108,26 @@ struct ConfirmTasksView: View {
     }
 
     private func applyBulkReminder() {
-        for d in localDrafts {
-            var updated = d
-
-            // без даты напоминание невозможно — выключаем
-            if updated.dueDate == nil {
-                updated.reminderEnabled = false
-            } else {
-                updated.reminderEnabled = bulkReminderEnabled
-                updated.reminderMinutesBefore = bulkMinutes
+        for i in localDrafts.indices {
+            if localDrafts[i].dueDate != nil {
+                localDrafts[i].reminderEnabled = bulkReminderEnabled
+                localDrafts[i].reminderMinutesBefore = bulkMinutes
+                onUpdate(localDrafts[i])
             }
-
-            updateDraft(updated) // 🔥 обновляем локально + отправляем наружу
-        }
-    }
-
-    // MARK: - Confirm
-
-    private func confirmTapped() {
-        Task {
-            // Если календарь не нужен — просто подтверждаем
-            guard addToCalendar else {
-                onConfirm()
-                return
-            }
-
-            // Просим доступ (только чтобы показать алерт заранее)
-            let auth = await CalendarService.shared.requestAccessIfNeeded()
-            guard auth == .authorized else {
-                showCalendarDeniedAlert = true
-                // всё равно добавим задачи в приложение
-                onConfirm()
-                return
-            }
-
-            // ⚠️ ВАЖНО: НЕ создаём события по drafts здесь,
-            // иначе будут дубли (потому что потом TaskModel снова синкнется).
-            // События создаём только там, где уже есть TaskModel + можно записать calendarEventID.
-            onConfirm()
         }
     }
 }
 
-// MARK: - Row
+// MARK: - Draft Row
 
 private struct DraftRow: View {
+
     let draft: TaskDraft
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+
+            HStack {
                 Text(draft.title.isEmpty ? "Без названия" : draft.title)
                     .lineLimit(2)
 
@@ -212,15 +136,14 @@ private struct DraftRow: View {
                 if draft.reminderEnabled, draft.dueDate != nil {
                     Text("⏰ \(draft.reminderMinutesBefore) мин")
                         .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(6)
                         .background(.thinMaterial)
                         .clipShape(Capsule())
                 }
             }
 
-            if let d = draft.dueDate {
-                Text(d.formatted(date: .abbreviated, time: .shortened))
+            if let date = draft.dueDate {
+                Text(date.formatted(date: .abbreviated, time: .shortened))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
@@ -228,87 +151,68 @@ private struct DraftRow: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            if let address = draft.address, !address.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.vertical, 4)
     }
 }
 
-// MARK: - Edit screen
+// MARK: - Edit View
 
 private struct EditDraftView: View {
-    @Environment(\.dismiss) private var dismiss
 
+    @Environment(\.dismiss) private var dismiss
     @State var draft: TaskDraft
     let onSave: (TaskDraft) -> Void
 
-    private let minuteOptions = [5, 10, 15, 30, 60]
-
     var body: some View {
         Form {
+
             Section("Задача") {
                 TextField("Название", text: $draft.title)
             }
 
+            Section("Место") {
+                TextField("Адрес", text: Binding(
+                    get: { draft.address ?? "" },
+                    set: { draft.address = $0.isEmpty ? nil : $0 }
+                ))
+            }
+
             Section("Дата") {
-                Toggle(
-                    "Есть дата",
-                    isOn: Binding(
-                        get: { draft.dueDate != nil },
-                        set: { hasDate in
-                            if hasDate {
-                                draft.dueDate = draft.dueDate ?? Date()
-                            } else {
-                                draft.dueDate = nil
-                                draft.reminderEnabled = false
-                            }
-                        }
-                    )
-                )
+                Toggle("Есть дата", isOn: Binding(
+                    get: { draft.dueDate != nil },
+                    set: {
+                        draft.dueDate = $0 ? Date() : nil
+                        if !$0 { draft.reminderEnabled = false }
+                    }
+                ))
 
                 if let date = draft.dueDate {
-                    DatePicker(
-                        "Когда",
-                        selection: Binding(
-                            get: { date },
-                            set: { draft.dueDate = $0 }
-                        ),
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
+                    DatePicker("Когда", selection: Binding(
+                        get: { date },
+                        set: { draft.dueDate = $0 }
+                    ))
                 }
             }
 
             Section("Напоминание") {
-                Toggle(
-                    "Напомнить",
-                    isOn: Binding(
-                        get: { draft.reminderEnabled && draft.dueDate != nil },
-                        set: { on in
-                            if draft.dueDate == nil {
-                                draft.reminderEnabled = false
-                            } else {
-                                draft.reminderEnabled = on
-                            }
-                        }
-                    )
-                )
-                .disabled(draft.dueDate == nil)
-
-                if draft.reminderEnabled, draft.dueDate != nil {
-                    Picker("За сколько минут", selection: $draft.reminderMinutesBefore) {
-                        ForEach(minuteOptions, id: \.self) { m in
-                            Text("\(m) мин").tag(m)
-                        }
-                    }
-                }
+                Toggle("Напомнить", isOn: $draft.reminderEnabled)
+                    .disabled(draft.dueDate == nil)
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-
         .navigationTitle("Редактировать")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Сохранить") {
@@ -318,4 +222,16 @@ private struct EditDraftView: View {
             }
         }
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    ConfirmTasksView(
+        drafts: [],
+        onCancel: {},
+        onDelete: { _ in },
+        onUpdate: { _ in },
+        onConfirm: { _ in }
+    )
 }

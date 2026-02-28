@@ -1,7 +1,18 @@
+//
+//  UpcomingView.swift
+//  SayDo
+//
+//  Created by Denys Ilchenko on 28.02.26.
+//
+
+
 import SwiftUI
 import SwiftData
+import MapKit
+import CoreLocation
 
 struct UpcomingView: View {
+
     @Environment(\.modelContext) private var context
     @Query private var tasks: [TaskModel]
     @State private var selectedTask: TaskModel?
@@ -32,16 +43,22 @@ struct UpcomingView: View {
         .navigationTitle("Upcoming")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                modeSwitcher
-            }
+            ToolbarItem(placement: .topBarTrailing) { modeSwitcher }
         }
         .sheet(item: $selectedTask) { TaskEditorView(task: $0) }
+
+        // ✅ reconcile: если пользователь удалил событие в Apple Calendar — удаляем задачу в приложении
+        .task {
+            await reconcileCalendarDeletions()
+        }
     }
+}
 
-    // MARK: - Top switcher (Glass)
+// MARK: - Mode switcher
 
-    private var modeSwitcher: some View {
+private extension UpcomingView {
+
+    var modeSwitcher: some View {
         HStack(spacing: 0) {
             modeButton(icon: "list.bullet", mode: .list)
             modeButton(icon: "calendar", mode: .calendar)
@@ -50,7 +67,7 @@ struct UpcomingView: View {
         .glassPill()
     }
 
-    private func modeButton(icon: String, mode: Mode) -> some View {
+    func modeButton(icon: String, mode: Mode) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) { self.mode = mode }
         } label: {
@@ -64,27 +81,37 @@ struct UpcomingView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
     }
+}
 
-    // MARK: - LIST MODE
+// MARK: - LIST MODE
 
-    private var listView: some View {
+private extension UpcomingView {
+
+    var listView: some View {
         List {
             if tasks.isEmpty {
-                EmptyStateCard(title:"Будущих задач нет", subtitle: "Добавь задачу с датой — она появится здесь.")
-                 
+                EmptyStateCard(
+                    title: "Будущих задач нет",
+                    subtitle: "Добавь задачу с датой — она появится здесь."
+                )
             } else {
-                ForEach(groupedKeys, id: \.self) { key in
-                    Section(sectionTitle(for: key)) {
-                        ForEach(grouped[key] ?? []) { task in
-                            TaskRow(task: task)
-                                .cardRowStyle()
-                                .onTapGesture { selectedTask = task }
-                                .swipeActions(edge: .trailing) {
-                                    Button("Inbox") { moveToInbox(task) }
-                                        .tint(.orange)
+                ForEach(groupedKeys, id: \.self) { day in
+                    Section(sectionTitle(for: day)) {
+                        ForEach(grouped[day] ?? []) { task in
 
-                                    Button("Удалить", role: .destructive) { deleteTask(task) }
-                                }
+                            TaskRow(
+                                task: task,
+                                onToggleDone: { toggleDone($0) },
+                                onOpen: { selectedTask = $0 }
+                            )
+                            .cardRowStyle()
+
+                            .swipeActions(edge: .trailing) {
+                                Button("Inbox") { moveToInbox(task) }
+                                    .tint(.orange)
+
+                                Button("Удалить", role: .destructive) { deleteTask(task) }
+                            }
                         }
                     }
                 }
@@ -93,9 +120,40 @@ struct UpcomingView: View {
         .cardListStyle()
     }
 
-    // MARK: - CALENDAR MODE
+    var grouped: [Date: [TaskModel]] {
+        let cal = Calendar.current
+        return Dictionary(grouping: tasks) { task in
+            cal.startOfDay(for: task.dueDate!) // dueDate != nil по фильтру
+        }
+    }
 
-    private var calendarView: some View {
+    var groupedKeys: [Date] {
+        grouped.keys.sorted()
+    }
+
+    func sectionTitle(for day: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(day) { return "Сегодня" }
+        if cal.isDateInTomorrow(day) { return "Завтра" }
+        if let afterTomorrow = cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: Date())),
+           cal.isDate(day, inSameDayAs: afterTomorrow) { return "Послезавтра" }
+        return russianWeekdayDayMonth(from: day)
+    }
+
+    func russianWeekdayDayMonth(from date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "ru_RU")
+        df.calendar = Calendar(identifier: .gregorian)
+        df.dateFormat = "EEEE, d MMMM"
+        return df.string(from: date)
+    }
+}
+
+// MARK: - CALENDAR MODE
+
+private extension UpcomingView {
+
+    var calendarView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 monthHeader
@@ -111,7 +169,7 @@ struct UpcomingView: View {
         .background(Color.clear)
     }
 
-    private var monthHeader: some View {
+    var monthHeader: some View {
         HStack {
             Button {
                 monthAnchor = Calendar.current.date(byAdding: .month, value: -1, to: monthAnchor) ?? monthAnchor
@@ -142,7 +200,7 @@ struct UpcomingView: View {
         .glassCard()
     }
 
-    private var weekdayHeader: some View {
+    var weekdayHeader: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
             ForEach(weekdaySymbolsRu, id: \.self) { s in
                 Text(s)
@@ -154,7 +212,7 @@ struct UpcomingView: View {
         .padding(.horizontal, 6)
     }
 
-    private var monthGrid: some View {
+    var monthGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 10) {
             ForEach(monthDays(for: monthAnchor), id: \.self) { day in
                 dayCell(day)
@@ -164,9 +222,8 @@ struct UpcomingView: View {
         .glassCard()
     }
 
-   
     @ViewBuilder
-    private var dayDetails: some View {
+    var dayDetails: some View {
         if let selectedDay {
             VStack(alignment: .leading, spacing: 10) {
                 Text(dayTitle(selectedDay))
@@ -180,15 +237,18 @@ struct UpcomingView: View {
                 } else {
                     VStack(spacing: 10) {
                         ForEach(items) { task in
-                            TaskRow(task: task)
-                                .cardRowStyle()
-                                .onTapGesture { selectedTask = task }
-                                .swipeActions(edge: .trailing) {
-                                    Button("Inbox") { moveToInbox(task) }
-                                        .tint(.orange)
+                            TaskRow(
+                                task: task,
+                                onToggleDone: { toggleDone($0) },
+                                onOpen: { selectedTask = $0 }
+                            )
+                            .cardRowStyle()
+                            .swipeActions(edge: .trailing) {
+                                Button("Inbox") { moveToInbox(task) }
+                                    .tint(.orange)
 
-                                    Button("Удалить", role: .destructive) { deleteTask(task) }
-                                }
+                                Button("Удалить", role: .destructive) { deleteTask(task) }
+                            }
                         }
                     }
                 }
@@ -196,15 +256,16 @@ struct UpcomingView: View {
             .padding(14)
             .glassCard()
         } else {
-            EmptyStateCard(title: "Выбери день", subtitle: "Нажми на дату в календаре — покажу задачи на этот день.")
-                .padding(14)
-                .glassCard()
+            EmptyStateCard(
+                title: "Выбери день",
+                subtitle: "Нажми на дату в календаре — покажу задачи на этот день."
+            )
+            .padding(14)
+            .glassCard()
         }
     }
 
-    // MARK: - Day Cell
-
-    private func dayCell(_ day: Date) -> some View {
+    func dayCell(_ day: Date) -> some View {
         let cal = Calendar.current
         let isCurrentMonth = cal.component(.month, from: day) == cal.component(.month, from: monthAnchor)
         let isSelected = selectedDay.map { cal.isDate($0, inSameDayAs: day) } ?? false
@@ -236,91 +297,28 @@ struct UpcomingView: View {
         .buttonStyle(.plain)
     }
 
-   
-
-    // MARK: - Grouping / Helpers
-
-    private var grouped: [Date: [TaskModel]] {
-        let cal = Calendar.current
-        return Dictionary(grouping: tasks) { task in
-            cal.startOfDay(for: task.dueDate!)
-        }
-    }
-
-    private var groupedKeys: [Date] {
-        grouped.keys.sorted()
-    }
-
-    private func sectionTitle(for day: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(day) { return "Сегодня" }
-        if cal.isDateInTomorrow(day) { return "Завтра" }
-        if let afterTomorrow = cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: Date())),
-           cal.isDate(day, inSameDayAs: afterTomorrow) { return "Послезавтра" }
-        return russianWeekdayDayMonth(from: day)
-    }
-
-    private func russianWeekdayDayMonth(from date: Date) -> String {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "ru_RU")
-        df.calendar = Calendar(identifier: .gregorian)
-        df.dateFormat = "EEEE, d MMMM"
-        return df.string(from: date)
-    }
-
-    private func save() { try? context.save() }
-    
-    private func removeCalendarEventIfNeeded(for task: TaskModel) {
-        guard let eventID = task.calendarEventID else { return }
-        try? CalendarService.shared.deleteEvent(eventID: eventID)
-        task.calendarEventID = nil
-    }
-
-    private func moveToInbox(_ task: TaskModel) {
-        // 1) убрать событие из календаря (если было)
-        removeCalendarEventIfNeeded(for: task)
-
-        // 2) превратить в Inbox-задачу
-        task.dueDate = nil
-        task.reminderEnabled = false
-        task.notificationID = nil  // если ты уведомления отдельно чистишь — ок, но это логично
-
-        save()
-    }
-
-    private func deleteTask(_ task: TaskModel) {
-        // 1) убрать событие из календаря
-        removeCalendarEventIfNeeded(for: task)
-
-        // 2) удалить из SwiftData
-        context.delete(task)
-        save()
-    }
-
-    private enum Mode { case list, calendar }
-
-    private var weekdaySymbolsRu: [String] {
+    var weekdaySymbolsRu: [String] {
         let df = DateFormatter()
         df.locale = Locale(identifier: "ru_RU")
         let s = df.shortStandaloneWeekdaySymbols ?? ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"]
         return Array(s.dropFirst()) + [s.first ?? "Вс"]
     }
 
-    private func monthTitle(_ date: Date) -> String {
+    func monthTitle(_ date: Date) -> String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "ru_RU")
         df.dateFormat = "LLLL yyyy"
         return df.string(from: date).capitalized
     }
 
-    private func dayTitle(_ date: Date) -> String {
+    func dayTitle(_ date: Date) -> String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "ru_RU")
         df.dateFormat = "EEEE, d MMMM"
         return df.string(from: date)
     }
 
-    private func monthDays(for anchor: Date) -> [Date] {
+    func monthDays(for anchor: Date) -> [Date] {
         let cal = Calendar.current
         let startOfMonth = cal.date(from: cal.dateComponents([.year, .month], from: anchor))!
         let range = cal.range(of: .day, in: .month, for: startOfMonth)!
@@ -329,6 +327,7 @@ struct UpcomingView: View {
         let prefix = mondayBased
 
         var days: [Date] = []
+
         if prefix > 0 {
             for i in stride(from: prefix, to: 0, by: -1) {
                 days.append(cal.date(byAdding: .day, value: -i, to: startOfMonth)!)
@@ -347,7 +346,7 @@ struct UpcomingView: View {
         return days
     }
 
-    private func tasksForDay(_ day: Date) -> [TaskModel] {
+    func tasksForDay(_ day: Date) -> [TaskModel] {
         let cal = Calendar.current
         return tasks.filter { t in
             guard let d = t.dueDate else { return false }
@@ -356,14 +355,93 @@ struct UpcomingView: View {
         .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
     }
 
-    private func hasTasks(on day: Date) -> Bool {
+    func hasTasks(on day: Date) -> Bool {
         !tasksForDay(day).isEmpty
     }
 }
 
-// MARK: - Glass Styles (one design system)
+// MARK: - Actions
+
+private extension UpcomingView {
+
+    func save() { try? context.save() }
+
+    func cancelNotificationIfNeeded(for task: TaskModel) {
+        guard let nid = task.notificationID else { return }
+        Task { await NotificationService.shared.cancel(id: nid) }
+    }
+
+    func removeCalendarEventIfNeeded(for task: TaskModel) {
+        guard let eventID = task.calendarEventID else { return }
+        try? CalendarService.shared.deleteEvent(eventID: eventID)
+        task.calendarEventID = nil
+    }
+
+    /// ✅ Done -> удалить event из календаря + выключить напоминание + отменить pending notification
+    func toggleDone(_ task: TaskModel) {
+        task.isDone.toggle()
+
+        if task.isDone == true {
+            removeCalendarEventIfNeeded(for: task)
+
+            cancelNotificationIfNeeded(for: task)
+            task.reminderEnabled = false
+            task.notificationID = nil
+        }
+
+        save()
+    }
+
+    func moveToInbox(_ task: TaskModel) {
+        removeCalendarEventIfNeeded(for: task)
+
+        cancelNotificationIfNeeded(for: task)
+        task.dueDate = nil
+        task.reminderEnabled = false
+        task.notificationID = nil
+
+        save()
+    }
+
+    func deleteTask(_ task: TaskModel) {
+        removeCalendarEventIfNeeded(for: task)
+
+        cancelNotificationIfNeeded(for: task)
+        context.delete(task)
+
+        save()
+    }
+
+    /// ✅ Если пользователь удалил событие из Apple Calendar — удаляем задачу в приложении
+    @MainActor
+    func reconcileCalendarDeletions() async {
+        let auth = await CalendarService.shared.requestAccessIfNeeded()
+        guard auth == .authorized else { return }
+
+        var changed = false
+
+        for t in tasks {
+            guard let eventID = t.calendarEventID else { continue }
+
+            if CalendarService.shared.eventExists(eventID: eventID) == false {
+                cancelNotificationIfNeeded(for: t)
+                context.delete(t)
+                changed = true
+            }
+        }
+
+        if changed {
+            try? context.save()
+        }
+    }
+}
+
+private enum Mode { case list, calendar }
+
+// MARK: - Glass Styles
 
 private extension View {
+
     func glassPill() -> some View {
         self
             .background(.ultraThinMaterial)
@@ -382,7 +460,33 @@ private extension View {
     }
 }
 
-#Preview {
-    NavigationStack { UpcomingView() }
-        .modelContainer(for: TaskModel.self, inMemory: true)
+// MARK: - Preview (без координат: только address)
+
+#Preview("Upcoming — sample tasks (address only)") {
+    let container = try! ModelContainer(
+        for: TaskModel.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    let context = container.mainContext
+
+    let cal = Calendar.current
+    let now = Date()
+
+    let t1 = TaskModel(title: "Встреча в кафе", dueDate: cal.date(byAdding: .day, value: 1, to: now)!)
+    t1.address = "Hauptstraße 10, Köln"        // ✅ только адрес
+    // t1.locationLat / locationLon НЕ задаём
+
+    let t2 = TaskModel(title: "Стоматолог", dueDate: cal.date(byAdding: .day, value: 3, to: now)!)
+    t2.address = "Berliner Allee 5, Düsseldorf" // ✅ только адрес
+    t2.reminderEnabled = true
+
+    let t3 = TaskModel(title: "Купить молоко", dueDate: cal.date(byAdding: .day, value: 2, to: now)!)
+    t3.reminderEnabled = true
+
+    context.insert(t1)
+    context.insert(t2)
+    context.insert(t3)
+
+    return NavigationStack { UpcomingView() }
+        .modelContainer(container)
 }

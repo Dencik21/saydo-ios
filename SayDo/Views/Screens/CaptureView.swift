@@ -2,24 +2,21 @@
 //  CaptureView.swift
 //  SayDo
 //
-//  Updated: Dark + AppBackground style
-//
 
 import SwiftUI
 import SwiftData
 
-
 struct CaptureView: View {
+
     @Environment(\.modelContext) private var context
     @StateObject private var vm = CaptureViewModel()
     @EnvironmentObject private var themeManager: ThemeManager
 
     private var ui: UI { UI(isDark: themeManager.theme == .dark) }
 
-    var body: some View { content }
-
-    private var content: some View {
+    var body: some View {
         ZStack(alignment: .bottomTrailing) {
+
             VStack(spacing: 16) {
                 statusCard
                 actions
@@ -34,51 +31,146 @@ struct CaptureView: View {
             .padding(.bottom, 18)
         }
         .task { await vm.requestPermission() }
-        .fullScreenCover(isPresented: reviewBinding) { reviewScreen }
+        .fullScreenCover(isPresented: reviewBinding) {
+            reviewScreen
+        }
         .overlay {
             if isProcessing {
                 ProgressOverlay(text: "Обрабатываю…", isDark: ui.isDark)
             }
-            
         }
         .navigationTitle("Capture")
     }
+}
 
-    
-    private struct ProgressOverlay: View {
-        let text: String
-        let isDark: Bool
+//
+// MARK: - REVIEW
+//
 
-        private var dim: Color { isDark ? Color.black.opacity(0.40) : Color.black.opacity(0.12) }
-        private var labelColor: Color { isDark ? .white.opacity(0.85) : .primary }
-        private var stroke: Color { isDark ? .white.opacity(0.10) : .black.opacity(0.06) }
-        private var material: AnyShapeStyle { isDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial) }
+private extension CaptureView {
 
-        var body: some View {
-            ZStack {
-                dim.ignoresSafeArea()
-
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text(text)
-                        .font(.footnote)
-                        .foregroundStyle(labelColor)
+    @ViewBuilder
+    var reviewScreen: some View {
+        if case .review(let drafts) = vm.phase {
+            ConfirmTasksView(
+                drafts: drafts,
+                onCancel: { vm.cancelReview() },
+                onDelete: { vm.deleteDraft($0) },
+                onUpdate: { vm.updateDraft($0) },
+                onConfirm: { addToCalendar in
+                    confirmDrafts(addToCalendar: addToCalendar)
                 }
-                .padding(18)
-                .background(material)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(stroke, lineWidth: 1)
-                )
-            }
+            )
         }
     }
-   
-    
-    // MARK: - Status card
 
-    private var statusCard: some View {
+    func confirmDrafts(addToCalendar: Bool) {
+
+        let models = vm.confirmedTasks()
+
+        // 1) Insert into SwiftData first
+        for m in models {
+            // Notification ID
+            if m.reminderEnabled {
+                m.notificationID = m.notificationID ?? UUID().uuidString
+            } else {
+                m.notificationID = nil
+            }
+
+            context.insert(m)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("❌ Save error:", error)
+        }
+
+        // 2) Calendar sync (optional)
+        if addToCalendar {
+            Task {
+                let auth = await CalendarService.shared.requestAccessIfNeeded()
+                guard auth == .authorized else { return }
+
+                for m in models {
+                    guard let due = m.dueDate else { continue }
+
+                    do {
+                        // ✅ IMPORTANT: upsert with taskID + existingEventID to prevent duplicates
+                        let eventID = try CalendarService.shared.upsertEvent(
+                            existingEventID: m.calendarEventID,
+                            taskID: m.id,
+                            title: m.title,
+                            dueDate: due,
+                            reminderEnabled: m.reminderEnabled,
+                            reminderMinutesBefore: m.reminderMinutesBefore
+                        )
+
+                        m.calendarEventID = eventID
+
+                    } catch {
+                        print("❌ Calendar error:", error)
+                    }
+                }
+
+                try? context.save()
+            }
+        }
+
+        // 3) Notifications
+        Task {
+            for m in models {
+                await scheduleIfNeeded(task: m)
+            }
+        }
+
+        vm.reset()
+    }
+}
+
+//
+// MARK: - NOTIFICATIONS
+//
+
+private extension CaptureView {
+
+    func scheduleIfNeeded(task: TaskModel) async {
+
+        guard let id = task.notificationID else { return }
+
+        guard task.isDone == false,
+              task.reminderEnabled,
+              let due = task.dueDate
+        else {
+            await NotificationService.shared.cancel(id: id)
+            return
+        }
+
+        let ok = await NotificationService.shared.requestAuthIfNeeded()
+        guard ok else { return }
+
+        let fireDate = due.addingTimeInterval(TimeInterval(-task.reminderMinutesBefore * 60))
+
+        guard fireDate > Date() else {
+            await NotificationService.shared.cancel(id: id)
+            return
+        }
+
+        await NotificationService.shared.schedule(
+            id: id,
+            title: task.title,
+            fireDate: fireDate
+        )
+    }
+}
+
+//
+// MARK: - STATUS UI
+//
+
+private extension CaptureView {
+
+    var statusCard: some View {
         Card(ui: ui) {
             Text(phaseTitle)
                 .font(.title3)
@@ -98,49 +190,44 @@ struct CaptureView: View {
         }
     }
 
-    private var phaseTitle: String {
+    var phaseTitle: String {
         switch vm.phase {
         case .idle: return "Нажми на микрофон и говори."
         case .listening: return "Слушаю…"
         case .processing: return "Обрабатываю…"
         case .review(let drafts): return "Найдено задач: \(drafts.count)"
-        case .error: return "Не получилось 😅"
+        case .error: return "Ошибка 😅"
         }
     }
 
-    private var phaseSubtitle: String? {
+    var phaseSubtitle: String? {
         switch vm.phase {
         case .idle:
-            return "Я превращу речь в задачи и покажу их на экране подтверждения."
+            return "Я превращу речь в задачи."
         case .listening:
-            return "Говори спокойно. После остановки я покажу готовые задачи."
+            return "Говори спокойно."
         case .processing:
-            return "Секунду — выделяю задачи и даты."
+            return "Выделяю задачи и даты."
         case .review:
-            return "Открой экран подтверждения."
+            return "Подтверди задачи."
         case .error:
             return nil
         }
     }
 
-    // MARK: - Actions
-
-    private var actions: some View {
+    var actions: some View {
         Group {
             if case .error = vm.phase {
                 HStack(spacing: 12) {
-                    Button { vm.reset() } label: {
-                        Label("Сбросить", systemImage: "xmark.circle")
-                            .frame(maxWidth: .infinity)
+
+                    Button("Сбросить") {
+                        vm.reset()
                     }
                     .buttonStyle(.bordered)
 
-                    Button {
+                    Button("Ещё раз") {
                         vm.reset()
                         vm.start()
-                    } label: {
-                        Label("Ещё раз", systemImage: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -148,93 +235,30 @@ struct CaptureView: View {
         }
     }
 
-    // MARK: - Review Screen
-
-    @ViewBuilder
-    private var reviewScreen: some View {
-        if case .review(let drafts) = vm.phase {
-            ConfirmTasksView(
-                drafts: drafts,
-                onCancel: { vm.cancelReview() },
-                onDelete: { vm.deleteDraft($0) },
-                onUpdate: { vm.updateDraft($0) },
-                onConfirm: { confirmDrafts() }
-            )
-        }
-    }
-
-    private func confirmDrafts() {
-        let models = vm.confirmedTasks()
-
-        for m in models {
-            if m.reminderEnabled {
-                m.notificationID = m.notificationID ?? UUID().uuidString
-            } else {
-                m.notificationID = nil
-            }
-            context.insert(m)
-        }
-
-        do { try context.save() } catch { print("❌ Save error:", error) }
-
-        Task {
-            for m in models { await scheduleIfNeeded(task: m) }
-        }
-
-        vm.reset()
-    }
-
-    // MARK: - Notifications
-
-    private func scheduleIfNeeded(task: TaskModel) async {
-        guard let id = task.notificationID else { return }
-
-        guard task.isDone == false,
-              task.reminderEnabled,
-              let due = task.dueDate
-        else {
-            await NotificationService.shared.cancel(id: id)
-            return
-        }
-
-        let ok = await NotificationService.shared.requestAuthIfNeeded()
-        guard ok else { return }
-
-        let fireDate = due.addingTimeInterval(TimeInterval(-task.reminderMinutesBefore * 60))
-        guard fireDate > Date() else {
-            await NotificationService.shared.cancel(id: id)
-            return
-        }
-
-        await NotificationService.shared.schedule(id: id, title: task.title, fireDate: fireDate)
-    }
-
-    // MARK: - Helpers
-
-    private var isProcessing: Bool {
+    var isProcessing: Bool {
         if case .processing = vm.phase { return true }
         return false
     }
 
-    private var reviewBinding: Binding<Bool> {
+    var reviewBinding: Binding<Bool> {
         Binding(
             get: { if case .review = vm.phase { return true } else { return false } },
-            set: { newValue in if !newValue { vm.cancelReview() } }
+            set: { if !$0 { vm.cancelReview() } }
         )
     }
 }
 
-// MARK: - UI tokens
+//
+// MARK: - UI SUPPORT
+//
 
 private struct UI {
     let isDark: Bool
     var primaryText: Color { isDark ? .white : .primary }
-    var secondaryText: Color { isDark ? .white.opacity(0.75) : .secondary }
-    var stroke: Color { isDark ? .white.opacity(0.10) : .black.opacity(0.06) }
+    var secondaryText: Color { isDark ? .white.opacity(0.7) : .secondary }
+    var stroke: Color { isDark ? .white.opacity(0.1) : .black.opacity(0.05) }
     var material: AnyShapeStyle { isDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial) }
 }
-
-// MARK: - Card
 
 private struct Card<Content: View>: View {
     let ui: UI
@@ -255,10 +279,31 @@ private struct Card<Content: View>: View {
     }
 }
 
+private struct ProgressOverlay: View {
+    let text: String
+    let isDark: Bool
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(isDark ? 0.4 : 0.15)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(text)
+                    .font(.footnote)
+            }
+            .padding(20)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
         CaptureView()
     }
     .modelContainer(for: TaskModel.self, inMemory: true)
-    .environmentObject(ThemeManager()) 
+    .environmentObject(ThemeManager())
 }
