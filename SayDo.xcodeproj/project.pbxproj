@@ -22,14 +22,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		0E2B35E82F43B0BB0009B230 /* Exceptions for "SayDo" folder in "SayDo" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-				Utils/Date.swift,
-			);
-			target = 0E2B354C2F43AC4B0009B230 /* SayDo */;
-		};
 		0E34362E2F47250A003AD5C4 /* Exceptions for "SayDoTests" folder in "SayDoTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -39,23 +31,9 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		0E8C07122F44E2790089E1D3 /* Exceptions for "SayDo" folder in "Copy Bundle Resources" phase from "SayDo" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = 0E2B354B2F43AC4B0009B230 /* Resources */;
-			membershipExceptions = (
-				Utils/Date.swift,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0E2B354F2F43AC4B0009B230 /* SayDo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				0E2B35E82F43B0BB0009B230 /* Exceptions for "SayDo" folder in "SayDo" target */,
-				0E8C07122F44E2790089E1D3 /* Exceptions for "SayDo" folder in "Copy Bundle Resources" phase from "SayDo" target */,
-			);
 			path = SayDo;
 			sourceTree = "<group>";
 		};
